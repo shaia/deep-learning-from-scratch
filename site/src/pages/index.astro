@@ -1,0 +1,89 @@
+---
+// The book's linear table of contents: every published module in curriculum order.
+import BaseLayout from '../layouts/BaseLayout.astro';
+import { getCollection } from 'astro:content';
+
+const posts = (await getCollection('posts', ({ data }) => !data.draft)).sort(
+  (a, b) => a.data.moduleNumber - b.data.moduleNumber
+);
+---
+
+<BaseLayout
+  title="Deep Learning From Scratch"
+  description="Re-deriving deep learning in code and prose — from the 1950s perceptron to Transformers and VAEs. Every idea implemented twice (C + NumPy), explained intuition-first, and animated."
+>
+  <h1>Deep Learning From Scratch</h1>
+  <p class="lede">
+    A coded, animated history of deep learning — re-derived from the 1950s
+    perceptron to modern Transformers. Every idea is built twice, in plain C and
+    in NumPy, explained intuition-first, and made to move.
+  </p>
+
+  {
+    posts.length === 0 ? (
+      <p class="empty">
+        No modules published yet. The first one — the perceptron — is on its way.
+      </p>
+    ) : (
+      <ol class="toc">
+        {posts.map((post) => (
+          <li class="toc__item">
+            <a href={`/posts/${post.slug}/`} class="toc__link">
+              <span class="toc__num">
+                {String(post.data.moduleNumber).padStart(2, '0')}
+              </span>
+              <span class="toc__text">
+                <span class="toc__title">{post.data.title}</span>
+                <span class="toc__desc">{post.data.description}</span>
+              </span>
+            </a>
+          </li>
+        ))}
+      </ol>
+    )
+  }
+
+  <style>
+    .lede {
+      font-size: 1.2rem;
+      color: var(--color-muted);
+      margin: 0 0 2.5rem;
+    }
+    .empty {
+      color: var(--color-muted);
+      font-style: italic;
+    }
+    .toc {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .toc__link {
+      display: flex;
+      gap: 1rem;
+      align-items: baseline;
+      padding: 1rem 0;
+      border-top: 1px solid var(--color-border);
+      text-decoration: none;
+      color: var(--color-text);
+    }
+    .toc__item:last-child .toc__link {
+      border-bottom: 1px solid var(--color-border);
+    }
+    .toc__num {
+      font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+      color: var(--viz-accent);
+      font-size: 0.95rem;
+    }
+    .toc__text { display: flex; flex-direction: column; }
+    .toc__title {
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-weight: 600;
+    }
+    .toc__desc {
+      color: var(--color-muted);
+      font-size: 0.9rem;
+    }
+    .toc__link:hover .toc__title { color: var(--color-link); }
+  </style>
+</BaseLayout>

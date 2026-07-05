@@ -1,0 +1,21 @@
+---
+// One route per module post. The slug comes from each entry's `slug` frontmatter
+// (conventionally "NN-slug"), so URLs read /posts/00-perceptron/.
+import { getCollection } from 'astro:content';
+import PostLayout from '../../layouts/PostLayout.astro';
+
+export async function getStaticPaths() {
+  const posts = await getCollection('posts', ({ data }) => !data.draft);
+  return posts.map((entry) => ({
+    params: { slug: entry.slug },
+    props: { entry },
+  }));
+}
+
+const { entry } = Astro.props;
+const { Content } = await entry.render();
+---
+
+<PostLayout entry={entry}>
+  <Content />
+</PostLayout>

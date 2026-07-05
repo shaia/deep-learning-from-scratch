@@ -1,0 +1,50 @@
+---
+// Reference widget component: canvas + reset control inside the shared frame,
+// mounted by a client-side script. This is the pattern real module widgets copy.
+// Embed in any MDX post with:  import ExampleWidget from '../../components/viz/ExampleWidget.astro'
+import WidgetFrame from './WidgetFrame.astro';
+---
+
+<WidgetFrame
+  title="Reference widget"
+  caption="A placeholder pattern, not a lesson: toggle the site theme and watch the colors follow; press Reset to re-seed the deterministic scene."
+  alt="Two classes of dots drifting rightward across a horizontal axis, colored by the site's data palette."
+>
+  <canvas id="example-canvas" width="640" height="240" style="max-width:100%;height:auto"
+  ></canvas>
+  <div class="controls">
+    <button id="example-reset" type="button">Reset</button>
+  </div>
+</WidgetFrame>
+
+<script>
+  import { mountExampleWidget } from './exampleCanvas';
+
+  const canvas = document.getElementById('example-canvas') as HTMLCanvasElement | null;
+  const resetBtn = document.getElementById('example-reset');
+  if (canvas) {
+    const widget = mountExampleWidget(canvas);
+    resetBtn?.addEventListener('click', () => widget.reset());
+  }
+</script>
+
+<style>
+  .controls {
+    display: flex;
+    gap: 0.5rem;
+  }
+  .controls button {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.85rem;
+    padding: 0.35rem 0.9rem;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-bg);
+    color: var(--color-text);
+    cursor: pointer;
+  }
+  .controls button:hover {
+    border-color: var(--viz-accent);
+    color: var(--viz-accent);
+  }
+</style>

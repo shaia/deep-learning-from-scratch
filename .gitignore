@@ -1,0 +1,23 @@
+# ── Node / Astro (see site/.gitignore for site-local rules too) ──
+node_modules/
+dist/
+.astro/
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+
+# ── C / build ──
+build/
+*.o
+*.obj
+*.exe
+*.out
+
+# ── OS / editor ──
+.DS_Store
+Thumbs.db

@@ -1,0 +1,65 @@
+---
+// Wraps a rendered module post. Astro is the canonical home for the full
+// module; when `ghostUrl` is set we surface a link to the slim Ghost teaser /
+// newsletter (see docs/conventions/publishing.md).
+import BaseLayout from './BaseLayout.astro';
+import type { CollectionEntry } from 'astro:content';
+
+interface Props {
+  entry: CollectionEntry<'posts'>;
+}
+
+const { entry } = Astro.props;
+const { title, description, moduleNumber, ghostUrl } = entry.data;
+const moduleLabel = String(moduleNumber).padStart(2, '0');
+---
+
+<BaseLayout title={title} description={description}>
+  <article class="post">
+    <p class="post__eyebrow">Module {moduleLabel}</p>
+    <h1>{title}</h1>
+    <p class="post__lede">{description}</p>
+
+    <div class="post__body">
+      <slot />
+    </div>
+
+    {
+      ghostUrl && (
+        <aside class="post__newsletter">
+          <p>
+            Prefer it in your inbox?{' '}
+            <a href={ghostUrl} rel="noopener">
+              Read the short version &amp; subscribe on the newsletter →
+            </a>
+          </p>
+        </aside>
+      )
+    }
+  </article>
+
+  <style>
+    .post__eyebrow {
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.75rem;
+      color: var(--color-muted);
+      margin: 0 0 0.25rem;
+    }
+    .post__lede {
+      font-size: 1.15rem;
+      color: var(--color-muted);
+      margin: 0 0 2.5rem;
+    }
+    .post__newsletter {
+      margin-top: 3rem;
+      padding: 1rem 1.25rem;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface);
+      font-size: 0.95rem;
+    }
+    .post__newsletter p { margin: 0; }
+  </style>
+</BaseLayout>

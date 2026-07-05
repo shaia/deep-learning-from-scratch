@@ -1,0 +1,46 @@
+---
+// Shared shell for every interactive widget, so they all read as one book
+// (docs/conventions/viz-style.md): a titled figure, a "what to try" caption,
+// and a slot for the widget's own canvas + controls (incl. a reset control).
+interface Props {
+  title: string;
+  /** One line telling the reader what to poke at. */
+  caption: string;
+  /** Plain-text description of what the widget shows, for accessibility. */
+  alt: string;
+}
+const { title, caption, alt } = Astro.props;
+---
+
+<figure class="widget" role="group" aria-label={title}>
+  <div class="widget__stage" aria-label={alt}>
+    <slot />
+  </div>
+  <figcaption class="widget__caption">
+    <strong>{title}.</strong> {caption}
+  </figcaption>
+</figure>
+
+<style>
+  .widget {
+    margin: 2rem 0;
+    padding: 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-surface);
+  }
+  .widget__stage {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: center;
+  }
+  .widget__caption {
+    margin-top: 0.85rem;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.85rem;
+    color: var(--color-muted);
+    line-height: 1.5;
+  }
+  .widget__caption strong { color: var(--color-text); }
+</style>

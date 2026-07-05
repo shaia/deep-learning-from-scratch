@@ -1,0 +1,12 @@
+# build output
+dist/
+# generated types + cache
+.astro/
+# dependencies
+node_modules/
+# environment
+.env
+.env.production
+# logs / os
+npm-debug.log*
+.DS_Store
