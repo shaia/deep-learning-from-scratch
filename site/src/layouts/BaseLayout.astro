@@ -44,7 +44,7 @@ const siteName = 'Deep Learning From Scratch';
   </head>
   <body>
     <header class="site-header">
-      <a class="brand" href="/">{siteName}</a>
+      <a class="brand" href={import.meta.env.BASE_URL}>{siteName}</a>
       <button
         id="theme-toggle"
         class="theme-toggle"
@@ -61,7 +61,7 @@ const siteName = 'Deep Learning From Scratch';
 
     <footer class="site-footer">
       <p>
-        Built from scratch · <a href="/">contents</a> · source on
+        Built from scratch · <a href={import.meta.env.BASE_URL}>contents</a> · source on
         <a href="https://github.com">GitHub</a>
       </p>
     </footer>
