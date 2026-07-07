@@ -1,0 +1,436 @@
+---
+title: The Perceptron
+moduleNumber: 0
+description: The simplest machine that can learn — a weighted sum and a threshold, trained by Rosenblatt's rule. We build it from a brain cell, prove why it converges, watch it hit the wall on XOR, and follow the field into its first winter.
+draft: false
+---
+
+import PerceptronWidget from '../../components/viz/PerceptronWidget.astro';
+import LogicGateWidget from '../../components/viz/LogicGateWidget.astro';
+import BoundaryGeometryWidget from '../../components/viz/BoundaryGeometryWidget.astro';
+
+## Prologue: can a machine learn a decision?
+
+Every network in this book — every convolutional filter, every attention head, every
+billion-parameter language model — is a descendant of a single idea that fits on an index card:
+add up your inputs, and fire if the total crosses a line. The story of deep learning is really
+the story of what happens when you stack that idea, learn it from data, and let it grow. So we
+start where the field started, with the humblest version of it, and build up the intuition,
+the mathematics, and the running code by hand.
+
+### 1943: a neuron as arithmetic
+
+In 1943, the neurophysiologist Warren McCulloch and the logician Walter Pitts asked a question
+that sounds almost reckless: could you describe a *neuron* — a living brain cell — with nothing
+but arithmetic and logic? Their paper, *A Logical Calculus of the Ideas Immanent in Nervous
+Activity*, answered yes. They modelled a neuron as an **all-or-none** unit: it receives inputs,
+adds them up, and either fires or stays silent depending on whether the sum clears a fixed
+**threshold**. Wire enough of these units together, they showed, and you can compute any
+proposition in logic — a network of idealised neurons is, in principle, a logic circuit.
+
+It was a breathtaking abstraction, and it is the foundation everything else rests on. But it had
+one fatal limitation for our purposes: a McCulloch–Pitts network *cannot learn*. Every
+connection strength and every threshold is fixed by hand by the designer. The machine can
+compute, but it cannot improve from experience.
+
+### 1957: a machine that tunes itself
+
+The leap came in 1957, when the psychologist Frank Rosenblatt built the **perceptron** at the
+Cornell Aeronautical Laboratory. The unit was the same — a weighted sum through a threshold —
+but Rosenblatt added the missing ingredient: a **learning rule**. Show the perceptron labelled
+examples, and a simple, mechanical procedure would adjust the weights until it classified them
+correctly. The weights were no longer chosen by a human; they were *found* from data.
+
+The first perceptron was not a program but a machine. The **Mark I Perceptron** sensed the world
+through a 20×20 grid of 400 photocells; its weights were physical **potentiometers**, and small
+electric **motors** turned them during learning. When the U.S. Navy demonstrated it in 1958, the
+press lost its composure. The *New York Times* reported on "the embryo of an electronic computer
+that [the Navy] expects will be able to walk, talk, see, write, reproduce itself and be
+conscious of its existence." The reality was more modest — and its limits, which we will reach
+and prove later in this chapter, would stall the whole field for years.
+
+Here is the arc this chapter follows:
+
+| Year | Milestone | What it added |
+|------|-----------|---------------|
+| 1943 | McCulloch & Pitts | the neuron *as arithmetic* — but fixed by hand |
+| 1957–58 | Rosenblatt's perceptron | weights *learned from examples* |
+| 1969 | Minsky & Papert | a *proof* of the single-layer limit (XOR) |
+| 1986 | Backpropagation | learning *stacked* layers — the escape (Module 01) |
+
+## From a brain cell to arithmetic
+
+Strip a biological neuron to its computational cartoon and three parts remain. The **dendrites**
+carry incoming signals, each arriving over a connection of some strength. The **soma** (cell
+body) sums those signals. And the **axon** fires an all-or-none spike — a fixed pulse, not a
+graded one — when the accumulated input is large enough. The neuron does not report *how much*
+the threshold was exceeded; it reports only *whether* it was.
+
+The artificial version keeps exactly this shape. Give it an input vector $x = (x_0, x_1)$. Attach
+a **weight** $w_j$ to each input — the artificial analogue of a connection strength, saying *how
+much that input matters and in which direction*. Sum the weighted inputs, add a **bias** $b$ that
+shifts the threshold, and fire when the total is at least zero:
+
+$$
+z = w_0 x_0 + w_1 x_1 + b, \qquad
+\hat{y} = \begin{cases} 1 & z \ge 0 \\ 0 & z < 0. \end{cases}
+$$
+
+We call $z$ the **pre-activation** and $\hat{y}$ the prediction. The threshold test $z \ge 0$ is
+the **step** (or Heaviside) function — the mathematical stand-in for all-or-none firing. That is
+the entire McCulloch–Pitts neuron.
+
+### One neuron is already three logic gates
+
+McCulloch and Pitts' claim was that such units compute logic. It is worth seeing this concretely,
+because it is where the perceptron's power *and* its limit both come from. Choose the weights by
+hand and a single unit becomes a logic gate:
+
+- **AND** fires only when *both* inputs are 1. Take $w = (1, 1)$, $b = -1.5$: the sum $x_0 + x_1$
+  reaches $1.5$ only at $(1,1)$.
+- **OR** fires when *either* input is 1. Take $w = (1, 1)$, $b = -0.5$: any single 1 already
+  clears the threshold.
+- **NOT** flips its one input. Take $w = (-1, 0)$, $b = 0.5$: input $0$ fires, input $1$ does not.
+
+Toggle between them below. Watch how the four corners of the truth table are always split by a
+**single straight line** — and read off the exact weights and bias each gate uses:
+
+<LogicGateWidget />
+
+This is the crux. A single perceptron can compute any function whose "fires" and "doesn't-fire"
+cases can be separated by one straight line. AND, OR, and NOT all qualify. Hold on to the word
+*single* — one line — because the whole drama of this chapter is the function for which one line
+is not enough.
+
+The catch, again, is that we *chose* those weights. McCulloch and Pitts would have set the
+potentiometers by hand. Rosenblatt's question was: could the machine find them itself?
+
+## The intuition: one line that moves
+
+Geometrically, the boundary between "fires" and "stays silent" is the set of points where
+$z = 0$ — a straight line in the plane (a *hyperplane* in higher dimensions). On one side the
+perceptron says class 1; on the other, class 0. **Learning is nothing more than moving that
+line.**
+
+The rule is intuitive before it is formal. Feed the perceptron an example. If it gets the answer
+right, leave the weights alone. If it gets the answer wrong, give the line a small shove in the
+direction that would have fixed the mistake. Repeat. If a line that separates your two classes
+exists at all, this shoving is *guaranteed* to find one — a promise we will actually prove.
+
+Play with it. Press **Play** and watch the boundary swing into place on two blobs of data; each
+update nudges the line toward a point it currently gets wrong (ringed in pink):
+
+<PerceptronWidget />
+
+Then switch to **XOR** and press Play again. No matter how long it runs, the line never settles —
+it sweeps back and forth and separates nothing. That failure is not a bug, and it is not a matter
+of training longer. It is the wall this chapter is named for. First, though, let us understand
+exactly what those weights *mean*.
+
+## The geometry: what the weights mean
+
+The algebra $z = w \cdot x + b$ hides a clean geometric picture, and seeing it makes the learning
+rule obvious rather than magical. Three facts:
+
+1. **The weight vector $w$ is the boundary's normal.** The line $z = 0$ runs *perpendicular* to
+   $w$. Rotating $w$ rotates the boundary with it, always at a right angle.
+2. **The bias $b$ slides the boundary.** With $b = 0$ the line passes through the origin; making
+   $b$ more negative pushes the line in the direction $w$ points, without rotating it.
+3. **The pre-activation $z$ measures signed distance.** For any point $x$, the quantity
+   $z / \lVert w \rVert$ is exactly the signed perpendicular distance from $x$ to the boundary —
+   positive on the "fires" side, negative on the other, and larger in magnitude the farther away
+   the point is. So $z$ is not just a yes/no vote; it is a graded measure of *how confidently*,
+   and it is that gradient the learning rule exploits.
+
+Drag the $w$ arrow and the probe point to see all three at once — the line stays perpendicular to
+$w$, the dashed segment is the shortest path to the boundary, and its signed length is
+$z / \lVert w \rVert$:
+
+<BoundaryGeometryWidget />
+
+With this picture in hand, Rosenblatt's rule stops being a formula to memorise. A misclassified
+point sits on the wrong side of the line; to fix it we must move the line *toward* it, which
+means nudging the normal $w$ in the direction of that point. That is precisely what the rule does.
+
+## The math (all of it)
+
+We now have every piece. The model is the linear unit and its step:
+
+$$
+z = w_0 x_0 + w_1 x_1 + b, \qquad
+\hat{y} = \begin{cases} 1 & z \ge 0 \\ 0 & \text{otherwise.} \end{cases}
+$$
+
+Learning is **Rosenblatt's rule**. For each example, look at the error $\,y - \hat{y}\,$, which is
+$-1$, $0$, or $+1$, and nudge the weights and bias:
+
+$$
+w \leftarrow w + \eta\,(y - \hat{y})\,x, \qquad b \leftarrow b + \eta\,(y - \hat{y}),
+$$
+
+where $\eta$ (the **learning rate**, the `lr` slider in the widget above) sets the step size. If
+the prediction is right, $y - \hat{y} = 0$ and nothing moves. That is the whole algorithm — no
+calculus, no autograd, no solver.
+
+### Why the update works
+
+It is worth proving to yourself that the rule always pushes in the *right* direction. Suppose the
+perceptron misclassifies a point $x$, so $y - \hat{y} \ne 0$. Apply the update and ask what
+happens to the pre-activation *at that same point*. The new weights give
+
+$$
+z' = w' \cdot x + b' = z + \eta\,(y - \hat{y})\,(\lVert x \rVert^2 + 1).
+$$
+
+The factor $\lVert x \rVert^2 + 1$ is always positive, so $z$ moves in the sign of the error
+$(y - \hat{y})$. If the true label is $1$ but the unit stayed silent ($\hat{y} = 0$, error
+$+1$), then $z$ was negative and the update *increases* it — toward firing. If the true label is
+$0$ but the unit fired ($\hat{y} = 1$, error $-1$), the update *decreases* $z$ — toward silence.
+Every correction moves the point's score toward the correct side of the line. That is the local
+guarantee; the global one has a name.
+
+### The Perceptron Convergence Theorem
+
+Rosenblatt's rule does not merely improve — on separable data it *finishes*, in a bounded number
+of steps, no matter how the weights start. This is the **Perceptron Convergence Theorem**
+(Novikoff, 1962). State it with $\pm 1$ labels and the bias folded into $w$ (append a constant
+$1$ to every $x$), so a mistake-driven update is $w \leftarrow w + y\,x$:
+
+> Suppose the data is linearly separable — there is a unit vector $w^\*$ and a **margin**
+> $\gamma > 0$ with $y_n (w^\* \cdot x_n) \ge \gamma$ for every example — and every input satisfies
+> $\lVert x_n \rVert \le R$. Then, starting from $w = 0$, the perceptron makes at most
+> $\left(R/\gamma\right)^2$ mistakes before separating the data.
+
+The proof is two inequalities that squeeze the number of mistakes $k$ from both sides. Each update
+happens only on a mistake, on some point $(x, y)$.
+
+**Lower bound — the weights line up with $w^\*$.** Dotting the update with $w^\*$,
+
+$$
+w^\* \cdot w_{k} = w^\* \cdot w_{k-1} + y\,(w^\* \cdot x) \ge w^\* \cdot w_{k-1} + \gamma,
+$$
+
+so after $k$ mistakes $w^\* \cdot w_k \ge k\gamma$.
+
+**Upper bound — the weights cannot grow too fast.** Because the point was misclassified,
+$y\,(w_{k-1} \cdot x) < 0$, so
+
+$$
+\lVert w_k \rVert^2 = \lVert w_{k-1} \rVert^2 + 2\,y\,(w_{k-1} \cdot x) + \lVert x \rVert^2
+\le \lVert w_{k-1} \rVert^2 + R^2,
+$$
+
+giving $\lVert w_k \rVert^2 \le k R^2$.
+
+**Squeeze.** Since $w^\*$ is a unit vector, Cauchy–Schwarz gives
+$w^\* \cdot w_k \le \lVert w_k \rVert$. Chaining the two bounds,
+
+$$
+k\gamma \;\le\; w^\* \cdot w_k \;\le\; \lVert w_k \rVert \;\le\; \sqrt{k}\,R
+\quad\Longrightarrow\quad k \le \left(\frac{R}{\gamma}\right)^{2}.
+$$
+
+The mistake count is finite and — strikingly — *independent of the dimension* and of how many
+examples you have. It depends only on the geometry: the reach of the data $R$ against the margin
+$\gamma$. A wider gap between the classes means faster convergence. (Our 0/1 code uses the same
+mistake-driven flavour; the $\pm 1$ form just makes the algebra clean.)
+
+## The code: from scratch, and bit-for-bit
+
+The whole project keeps a strict contract (pedagogy principle #3): the **C and Python
+implementations produce identical numbers on the same seed**, so a test can hold them to each
+other to $10^{-9}$ rather than "roughly agrees." That contract shapes even the boring parts of
+the code, so it is worth seeing more than just the update.
+
+### A deterministic RNG we can reproduce in two languages
+
+NumPy's random generator would make the two languages diverge immediately, so we roll our own —
+a 64-bit **linear congruential generator** with the well-known Knuth/PCG constants — and use only
+integer arithmetic, which is exact in both languages. In C:
+
+```c
+typedef struct { uint64_t state; } Rng;
+
+static uint64_t rng_next_u64(Rng *r) {
+    r->state = r->state * 6364136223846793005ULL + 1442695040888963407ULL;
+    return r->state;
+}
+static double rng_uniform(Rng *r) {          /* top 53 bits / 2^53  -> [0,1) */
+    return (double)(rng_next_u64(r) >> 11) * (1.0 / 9007199254740992.0);
+}
+```
+
+The Python mirror emulates 64-bit unsigned overflow with an explicit mask so the *bit stream*
+matches exactly:
+
+```python
+_MASK64 = (1 << 64) - 1
+
+class Rng:
+    def __init__(self, seed): self.state = seed & _MASK64
+    def next_u64(self):
+        self.state = (self.state * 6364136223846793005 + 1442695040888963407) & _MASK64
+        return self.state
+    def uniform(self):                        # top 53 bits / 2^53 -> [0,1)
+        return (self.next_u64() >> 11) * (1.0 / 9007199254740992.0)
+```
+
+The dataset is two blobs — class 0 centred at $(-2,-2)$, class 1 at $(+2,+2)$ — generated with
+**arithmetic only** (no `sin`/`log`/`sqrt`), for the same reason: transcendental functions can
+round differently across languages. The ideal separating line is $x_0 + x_1 = 0$.
+
+### The unit and the learning rule
+
+The model is three doubles. The forward pass is the pre-activation and the step; the learning
+rule is written straight out. In C:
+
+```c
+typedef struct { double w0, w1, b; } Perceptron;
+
+static double preactivation(const Perceptron *p, double x0, double x1) {
+    return p->w0 * x0 + p->w1 * x1 + p->b;      /* z = w0*x0 + w1*x1 + b */
+}
+static int predict(const Perceptron *p, double x0, double x1) {
+    return preactivation(p, x0, x1) >= 0.0 ? 1 : 0;   /* step(z) */
+}
+
+/* One pass of Rosenblatt's rule over all n samples, in fixed order. */
+static void train_epoch(Perceptron *p, double lr,
+                        double X[N_SAMPLES][N_FEATURES], int y[N_SAMPLES], int n) {
+    for (int i = 0; i < n; i++) {
+        int yhat = predict(p, X[i][0], X[i][1]);
+        double err = (double)(y[i] - yhat);     /* -1, 0, or +1 */
+        p->w0 += lr * err * X[i][0];
+        p->w1 += lr * err * X[i][1];
+        p->b  += lr * err;
+    }
+}
+```
+
+And the same thing in Python, line for line, so the two read side by side:
+
+```python
+def train_epoch(p, lr, X, y, n):
+    """One pass of Rosenblatt's rule over all samples, fixed order (mirrors C)."""
+    for i in range(n):
+        x0, x1 = float(X[i, 0]), float(X[i, 1])
+        yhat = p.predict(x0, x1)
+        err = float(int(y[i]) - yhat)            # -1, 0, or +1
+        p.w0 += lr * err * x0
+        p.w1 += lr * err * x1
+        p.b += lr * err
+```
+
+Train on the blobs with learning rate $\eta = 0.1$ for 20 epochs and the perceptron reaches
+**100% accuracy** — the boundary settles into the separating line the theorem promised exists. A
+small agreement test compiles the C, runs the Python, and asserts all eight tracked numbers
+(the final $w_0, w_1, b$, and accuracy for both experiments) match to $10^{-9}$. That is what
+makes "C and Python agree" a checkable fact rather than a hope.
+
+Both implementations, the self-checking notebook, and the test live in
+[`topics/00-perceptron/`](https://github.com/shaia/depth-learning-from-scratch/tree/main/topics/00-perceptron).
+
+## Watch it learn
+
+The same algorithm, animated — the boundary moves through the *real* weight snapshots the
+perceptron produces, first separating the blobs, then failing forever on XOR:
+
+<figure>
+  <video controls playsinline preload="metadata" width="720" style="max-width:100%;height:auto;border-radius:8px">
+    <source src={`${import.meta.env.BASE_URL}media/00-perceptron.mp4`} type="video/mp4" />
+    Your browser does not support the video tag.
+  </video>
+  <figcaption style="font-size:0.85rem;color:var(--color-muted);margin-top:0.5rem">
+    Rosenblatt's rule nudges the line toward each misclassified point (pink) until the blobs are
+    separated — then the same rule sweeps every angle on XOR and separates nothing.
+  </figcaption>
+</figure>
+
+## The wall: XOR
+
+XOR — "exclusive or" — outputs 1 when its two inputs *differ* and 0 when they agree. Its truth
+table is the simplest thing a single perceptron cannot do:
+
+| $x_0$ | $x_1$ | XOR | needs the unit to… |
+|:---:|:---:|:---:|:---|
+| 0 | 0 | 0 | stay silent |
+| 0 | 1 | 1 | fire |
+| 1 | 0 | 1 | fire |
+| 1 | 1 | 0 | stay silent |
+
+The two "fire" points sit on one diagonal; the two "silent" points on the other. No straight line
+can put both fire-points on one side and both silent-points on the other. Switch the widget above
+to **XOR** and you can watch the perceptron confirm this the hard way — accuracy oscillates and
+never reaches 1.
+
+### A one-line proof of impossibility
+
+We do not have to take the picture's word for it. Suppose some perceptron $(w_0, w_1, b)$ *did*
+compute XOR. Then it must satisfy all four rows at once:
+
+- $(0,0) \mapsto 0$: $\;b < 0.$
+- $(1,0) \mapsto 1$: $\;w_0 + b \ge 0.$
+- $(0,1) \mapsto 1$: $\;w_1 + b \ge 0.$
+- $(1,1) \mapsto 0$: $\;w_0 + w_1 + b < 0.$
+
+Add the two middle inequalities: $w_0 + w_1 + 2b \ge 0$, hence $w_0 + w_1 + b \ge -b$. But the
+first line says $b < 0$, so $-b > 0$, which forces $w_0 + w_1 + b > 0$. That flatly contradicts
+the fourth line, $w_0 + w_1 + b < 0$. No such perceptron exists. The failure is not about
+training or luck — it is a theorem.
+
+### The escape, foreshadowed
+
+Notice that XOR *is* expressible with McCulloch–Pitts units — just not with **one**. XOR equals
+"($x_0$ OR $x_1$) AND NOT ($x_0$ AND $x_1$)", a little circuit of the gates we built earlier.
+Two layers of perceptrons can do it; a single layer cannot. The obstacle was never expressiveness
+— it was **learning**. Rosenblatt's rule trains one layer. Nobody yet knew how to train the
+*hidden* layer of a stack. That missing algorithm is the chain rule, and finding it is the whole
+of the next chapter.
+
+## The aftermath: the first winter
+
+In 1969, Marvin Minsky and Seymour Papert published *Perceptrons*, a rigorous mathematical
+analysis of exactly what single-layer perceptrons can and cannot represent — with the XOR/parity
+limitation at its centre. The book is often credited (fairly or not) with cooling enthusiasm and
+funding for neural-network research through the 1970s. The connectionist program went quiet for
+the better part of two decades.
+
+| Year | Event |
+|------|-------|
+| 1958 | Rosenblatt's perceptron and the Mark I machine; the press hype |
+| 1969 | Minsky & Papert, *Perceptrons* — the single-layer limit, proved |
+| 1970s | Funding and interest recede — the connectionist "winter" |
+| 1986 | Rumelhart, Hinton & Williams popularise **backpropagation** |
+
+The thaw came in 1986, when Rumelhart, Hinton, and Williams showed how to train the stacked
+weights of a multilayer network by **back-propagating errors** — writing the chain rule out
+across layers so that a hidden layer could learn too. XOR fell immediately. The line that could
+not bend learned to bend.
+
+## Exercises & what's next
+
+Before moving on, poke at the ideas until they are yours:
+
+1. **Push the learning rate.** In the training widget, drag `lr` to its extremes. Does a larger
+   step reach 100% faster, or does it overshoot and thrash? Relate what you see to the
+   convergence theorem — the bound counts *mistakes*, not epochs.
+2. **Break separability by hand.** Click to add a class-A point deep inside the class-B blob
+   (Shift-click adds the other class). Watch the perceptron lose its guarantee — the moment the
+   data stops being linearly separable, the "finishes in $(R/\gamma)^2$ steps" promise is void.
+3. **Wire a gate yourself.** From the logic-gate widget, work out weights and a bias for **NAND**
+   (fires *except* at $(1,1)$). Confirm your numbers give the right truth table. Then convince
+   yourself that NAND plus OR plus AND is enough to build XOR in two layers.
+4. **Feel the geometry.** In the geometry widget, set the bias with the slider and predict, before
+   dragging, which way the boundary will slide. Then drag $w$ and confirm the line stays
+   perpendicular to it.
+
+Then go deeper into the running code: the self-verifying
+[`notebook.ipynb`](https://github.com/shaia/depth-learning-from-scratch/blob/main/topics/00-perceptron/notebook.ipynb)
+rebuilds everything above cell by cell with inline plots, and
+[`assignment.ipynb`](https://github.com/shaia/depth-learning-from-scratch/blob/main/topics/00-perceptron/assignment.ipynb)
+hands you the load-bearing lines to implement yourself, graded against the canonical code.
+
+---
+
+*Next: [MLP + Backpropagation →](/posts/01-mlp-backprop/) — stack the lines, learn the hidden
+layer with the chain rule written out by hand, and break the XOR wall.*

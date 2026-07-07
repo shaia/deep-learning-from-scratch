@@ -1,0 +1,114 @@
+---
+// Module 00's geometry interactive: the weight vector w is the boundary's
+// normal, the bias b slides the boundary, and z / ‖w‖ is the signed distance
+// from a point to the line. Embed in MDX with:
+//   import BoundaryGeometryWidget from '../../components/viz/BoundaryGeometryWidget.astro'
+import WidgetFrame from './WidgetFrame.astro';
+---
+
+<WidgetFrame
+  title="The geometry of w, b, and z"
+  caption="Drag the w arrow: the boundary always stays perpendicular to it, because w is the line's normal. Drag the probe point x: the dashed segment is the shortest path to the line, and its signed length is z / ‖w‖. Slide b to push the whole boundary off the origin without rotating it."
+  alt="A plane split by a decision line. An arrow w points from the origin perpendicular to the line; a draggable probe point shows its signed perpendicular distance to the line."
+>
+  <canvas
+    id="geometry-canvas"
+    width="520"
+    height="420"
+    style="max-width:100%;height:auto;cursor:grab;touch-action:none"></canvas>
+
+  <div class="controls">
+    <label class="slider">
+      b
+      <input id="geometry-bias" type="range" min="-4" max="4" step="0.1" value="0" />
+      <span id="geometry-bias-val" class="mono">0.0</span>
+    </label>
+    <button id="geometry-reset" type="button">Reset</button>
+  </div>
+
+  <div id="geometry-stats" class="stats mono" aria-live="polite">
+    <span>w = (2.5, 1.5)</span>
+    <span>‖w‖ = 2.92</span>
+    <span>z = −0.45</span>
+    <span>dist = −0.15</span>
+  </div>
+</WidgetFrame>
+
+<script>
+  import { mountBoundaryGeometry, type GeometryState } from './boundaryGeometryCore';
+
+  const canvas = document.getElementById('geometry-canvas') as HTMLCanvasElement | null;
+  const bias = document.getElementById('geometry-bias') as HTMLInputElement | null;
+  const biasVal = document.getElementById('geometry-bias-val');
+  const resetBtn = document.getElementById('geometry-reset');
+  const stats = document.getElementById('geometry-stats');
+
+  const fmt = (n: number) => (n < 0 ? '−' : '') + Math.abs(n).toFixed(2);
+
+  if (canvas) {
+    const widget = mountBoundaryGeometry(canvas, {
+      onState(s: GeometryState) {
+        if (stats) {
+          stats.innerHTML =
+            `<span>w = (${fmt(s.w0)}, ${fmt(s.w1)})</span>` +
+            `<span>‖w‖ = ${s.normW.toFixed(2)}</span>` +
+            `<span>z = ${fmt(s.z)}</span>` +
+            `<span>dist = ${fmt(s.dist)}</span>`;
+        }
+      },
+    });
+
+    bias?.addEventListener('input', () => {
+      const v = Number(bias.value);
+      widget.setBias(v);
+      if (biasVal) biasVal.textContent = fmt(v);
+    });
+    resetBtn?.addEventListener('click', () => {
+      widget.reset();
+      if (bias) bias.value = '0';
+      if (biasVal) biasVal.textContent = '0.00';
+    });
+  }
+</script>
+
+<style>
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+    justify-content: center;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.85rem;
+  }
+  .controls button {
+    padding: 0.35rem 0.9rem;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-bg);
+    color: var(--color-text);
+    cursor: pointer;
+  }
+  .controls button:hover {
+    border-color: var(--viz-accent);
+    color: var(--viz-accent);
+  }
+  .slider {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--color-muted);
+  }
+  .slider input { accent-color: var(--viz-accent); }
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: center;
+    font-size: 0.85rem;
+    color: var(--color-muted);
+  }
+  .mono {
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  }
+</style>

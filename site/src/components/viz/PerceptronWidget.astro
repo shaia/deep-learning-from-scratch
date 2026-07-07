@@ -1,0 +1,139 @@
+---
+// Module 00's interactive: train a perceptron by hand and watch the decision
+// boundary swing into place — or get stuck forever on XOR. Embed in MDX with:
+//   import PerceptronWidget from '../../components/viz/PerceptronWidget.astro'
+import WidgetFrame from './WidgetFrame.astro';
+---
+
+<WidgetFrame
+  title="Train a perceptron"
+  caption="Press Play to run Rosenblatt's rule; each update nudges the line toward a misclassified point (ringed in pink). Switch to XOR to watch it fail no matter what. Drag the learning rate, or click the plot to add points (Shift-click for the orange class)."
+  alt="A 2D plane with two classes of dots and a moving straight decision boundary. In blobs mode the line separates the classes; in XOR mode no line can."
+>
+  <canvas
+    id="perceptron-canvas"
+    width="640"
+    height="420"
+    style="max-width:100%;height:auto;cursor:crosshair"></canvas>
+
+  <div class="controls">
+    <button id="perceptron-play" type="button">▶ Play</button>
+    <button id="perceptron-step" type="button">Step</button>
+    <button id="perceptron-reset" type="button">Reset</button>
+    <div class="seg" role="group" aria-label="Dataset">
+      <button id="perceptron-blobs" type="button" class="seg__btn is-on">Blobs</button>
+      <button id="perceptron-xor" type="button" class="seg__btn">XOR</button>
+    </div>
+    <label class="lr">
+      lr
+      <input id="perceptron-lr" type="range" min="0.005" max="0.3" step="0.005" value="0.05" />
+      <span id="perceptron-lr-val" class="mono">0.050</span>
+    </label>
+  </div>
+
+  <div id="perceptron-stats" class="stats mono" aria-live="polite">
+    <span>w = (0.000, 0.000)</span>
+    <span>b = 0.000</span>
+    <span>acc = 0%</span>
+    <span>epoch 0</span>
+  </div>
+</WidgetFrame>
+
+<script>
+  import { mountPerceptron, type Stats } from './perceptronCore';
+
+  const canvas = document.getElementById('perceptron-canvas') as HTMLCanvasElement | null;
+  const playBtn = document.getElementById('perceptron-play') as HTMLButtonElement | null;
+  const stepBtn = document.getElementById('perceptron-step');
+  const resetBtn = document.getElementById('perceptron-reset');
+  const blobsBtn = document.getElementById('perceptron-blobs');
+  const xorBtn = document.getElementById('perceptron-xor');
+  const lr = document.getElementById('perceptron-lr') as HTMLInputElement | null;
+  const lrVal = document.getElementById('perceptron-lr-val');
+  const stats = document.getElementById('perceptron-stats');
+
+  if (canvas) {
+    const w = mountPerceptron(canvas, {
+      onStats(s: Stats) {
+        if (playBtn) playBtn.textContent = s.playing ? '⏸ Pause' : '▶ Play';
+        if (stats) {
+          stats.innerHTML =
+            `<span>w = (${s.w0.toFixed(3)}, ${s.w1.toFixed(3)})</span>` +
+            `<span>b = ${s.b.toFixed(3)}</span>` +
+            `<span>acc = ${Math.round(s.acc * 100)}%</span>` +
+            `<span>epoch ${s.epoch}</span>`;
+        }
+      },
+    });
+
+    playBtn?.addEventListener('click', () => w.toggle());
+    stepBtn?.addEventListener('click', () => w.step());
+    resetBtn?.addEventListener('click', () => w.reset());
+    blobsBtn?.addEventListener('click', () => {
+      w.setMode('blobs');
+      blobsBtn.classList.add('is-on');
+      xorBtn?.classList.remove('is-on');
+    });
+    xorBtn?.addEventListener('click', () => {
+      w.setMode('xor');
+      xorBtn.classList.add('is-on');
+      blobsBtn?.classList.remove('is-on');
+    });
+    lr?.addEventListener('input', () => {
+      const v = Number(lr.value);
+      w.setLearningRate(v);
+      if (lrVal) lrVal.textContent = v.toFixed(3);
+    });
+  }
+</script>
+
+<style>
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    justify-content: center;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.85rem;
+  }
+  .controls button {
+    padding: 0.35rem 0.9rem;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-bg);
+    color: var(--color-text);
+    cursor: pointer;
+  }
+  .controls button:hover {
+    border-color: var(--viz-accent);
+    color: var(--viz-accent);
+  }
+  .seg { display: inline-flex; }
+  .seg__btn { border-radius: 0; }
+  .seg__btn:first-child { border-radius: 6px 0 0 6px; }
+  .seg__btn:last-child { border-radius: 0 6px 6px 0; border-left: none; }
+  .seg__btn.is-on {
+    background: var(--viz-accent);
+    color: #fff;
+    border-color: var(--viz-accent);
+  }
+  .lr {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--color-muted);
+  }
+  .lr input { accent-color: var(--viz-accent); }
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: center;
+    font-size: 0.85rem;
+    color: var(--color-muted);
+  }
+  .mono {
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  }
+</style>

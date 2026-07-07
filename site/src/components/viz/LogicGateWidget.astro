@@ -1,0 +1,148 @@
+---
+// Module 00's logic-gate interactive: a single McCulloch–Pitts unit computing
+// AND, OR, and NOT with hand-set weights — one straight line splitting each
+// truth table. Embed in MDX with:
+//   import LogicGateWidget from '../../components/viz/LogicGateWidget.astro'
+import WidgetFrame from './WidgetFrame.astro';
+---
+
+<WidgetFrame
+  title="One neuron, three gates"
+  caption="Toggle AND, OR, and NOT. Each is a weighted sum through a threshold — z = w₀x₀ + w₁x₁ + b, firing when z ≥ 0 — and each truth table is split by a single straight line. Read off the weights the unit uses, and notice: every gate here needs just one line. XOR (later) is the one that doesn't."
+  alt="A unit square with its four truth-table corners labelled 0 or 1 by the gate's output, split by one straight decision line that moves as you switch gates."
+>
+  <canvas
+    id="logicgate-canvas"
+    width="520"
+    height="420"
+    style="max-width:100%;height:auto"></canvas>
+
+  <div class="controls">
+    <div class="seg" role="group" aria-label="Gate">
+      <button id="gate-and" type="button" class="seg__btn is-on">AND</button>
+      <button id="gate-or" type="button" class="seg__btn">OR</button>
+      <button id="gate-not" type="button" class="seg__btn">NOT</button>
+    </div>
+    <button id="gate-reset" type="button">Reset</button>
+  </div>
+
+  <div class="readout">
+    <p id="gate-weights" class="mono weights">w = (1.0, 1.0)&nbsp;&nbsp;b = −1.5</p>
+    <table class="truth" aria-live="polite">
+      <thead>
+        <tr><th>x₀</th><th>x₁</th><th>z</th><th>ŷ</th></tr>
+      </thead>
+      <tbody id="gate-rows"></tbody>
+    </table>
+  </div>
+</WidgetFrame>
+
+<script>
+  import { mountLogicGate, type Gate, type GateState } from './logicGateCore';
+
+  const canvas = document.getElementById('logicgate-canvas') as HTMLCanvasElement | null;
+  const weights = document.getElementById('gate-weights');
+  const rows = document.getElementById('gate-rows');
+  const buttons: Record<Gate, HTMLElement | null> = {
+    and: document.getElementById('gate-and'),
+    or: document.getElementById('gate-or'),
+    not: document.getElementById('gate-not'),
+  };
+  const resetBtn = document.getElementById('gate-reset');
+
+  const fmt = (n: number) => (n < 0 ? '−' : '') + Math.abs(n).toFixed(1);
+
+  function highlight(active: Gate) {
+    (Object.keys(buttons) as Gate[]).forEach((g) =>
+      buttons[g]?.classList.toggle('is-on', g === active),
+    );
+  }
+
+  if (canvas) {
+    const widget = mountLogicGate(canvas, {
+      onState(s: GateState) {
+        if (weights) {
+          weights.innerHTML =
+            `w = (${fmt(s.w0)}, ${fmt(s.w1)})&nbsp;&nbsp;b = ${fmt(s.b)}`;
+        }
+        if (rows) {
+          rows.innerHTML = s.rows
+            .map((r) => {
+              const x1 = r.x1 === null ? '—' : String(r.x1);
+              const cls = r.out === 1 ? 'is-one' : 'is-zero';
+              return (
+                `<tr class="${cls}"><td>${r.x0}</td><td>${x1}</td>` +
+                `<td>${fmt(r.z)}</td><td>${r.out}</td></tr>`
+              );
+            })
+            .join('');
+        }
+        highlight(s.gate);
+      },
+    });
+
+    (Object.keys(buttons) as Gate[]).forEach((g) =>
+      buttons[g]?.addEventListener('click', () => widget.setGate(g)),
+    );
+    resetBtn?.addEventListener('click', () => widget.reset());
+  }
+</script>
+
+<style>
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    justify-content: center;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.85rem;
+  }
+  .controls button {
+    padding: 0.35rem 0.9rem;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-bg);
+    color: var(--color-text);
+    cursor: pointer;
+  }
+  .controls button:hover {
+    border-color: var(--viz-accent);
+    color: var(--viz-accent);
+  }
+  .seg { display: inline-flex; }
+  .seg__btn { border-radius: 0; }
+  .seg__btn:first-child { border-radius: 6px 0 0 6px; }
+  .seg__btn:last-child { border-radius: 0 6px 6px 0; border-left: none; }
+  .seg__btn:not(:first-child):not(:last-child) { border-left: none; }
+  .seg__btn.is-on {
+    background: var(--viz-accent);
+    color: #fff;
+    border-color: var(--viz-accent);
+  }
+  .readout {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.6rem;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.85rem;
+  }
+  .weights { color: var(--color-muted); margin: 0; }
+  .truth {
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    color: var(--color-text);
+  }
+  .truth th, .truth td {
+    padding: 0.2rem 0.75rem;
+    text-align: center;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .truth th { color: var(--color-muted); font-weight: 600; }
+  .truth td { font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; }
+  .truth tr:last-child td { border-bottom: none; }
+  .truth .is-one td:last-child { color: var(--viz-data-b); font-weight: 700; }
+  .truth .is-zero td:last-child { color: var(--viz-data-a); font-weight: 700; }
+  .mono { font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; }
+</style>
