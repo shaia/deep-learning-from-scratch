@@ -1,0 +1,150 @@
+---
+// Module 01's interactive: train a 2 -> H -> 1 sigmoid MLP with backprop and
+// watch the decision boundary bend around two moons — or solve XOR, the wall a
+// single perceptron never could. Embed in MDX with:
+//   import MlpWidget from '../../components/viz/MlpWidget.astro'
+import WidgetFrame from './WidgetFrame.astro';
+---
+
+<WidgetFrame
+  title="Train an MLP with backprop"
+  caption="Press Play to run gradient descent; the shaded regions are the network's prediction, bending into a curved boundary as it learns (misclassified points get a ring). Switch to XOR to solve Module 00's wall. Drag the learning rate, or the hidden width — set it to 1 and watch the network lose its power to bend."
+  alt="A 2D plane with two classes of dots and a shaded decision surface. As training runs, the boundary curves to separate two interleaving moons; with one hidden unit it can only draw a straight cut."
+>
+  <canvas
+    id="mlp-canvas"
+    width="640"
+    height="420"
+    style="max-width:100%;height:auto"></canvas>
+
+  <div class="controls">
+    <button id="mlp-play" type="button">▶ Play</button>
+    <button id="mlp-step" type="button">Step</button>
+    <button id="mlp-reset" type="button">Reset</button>
+    <div class="seg" role="group" aria-label="Dataset">
+      <button id="mlp-moons" type="button" class="seg__btn is-on">Two moons</button>
+      <button id="mlp-xor" type="button" class="seg__btn">XOR</button>
+    </div>
+    <label class="ctl">
+      lr
+      <input id="mlp-lr" type="range" min="0.05" max="2" step="0.05" value="0.5" />
+      <span id="mlp-lr-val" class="mono">0.50</span>
+    </label>
+    <label class="ctl">
+      hidden
+      <input id="mlp-hidden" type="range" min="1" max="12" step="1" value="6" />
+      <span id="mlp-hidden-val" class="mono">6</span>
+    </label>
+  </div>
+
+  <div id="mlp-stats" class="stats mono" aria-live="polite">
+    <span>loss = 0.000</span>
+    <span>acc = 0%</span>
+    <span>step 0</span>
+  </div>
+</WidgetFrame>
+
+<script>
+  import { mountMlp, type Stats } from './mlpCore';
+
+  const canvas = document.getElementById('mlp-canvas') as HTMLCanvasElement | null;
+  const playBtn = document.getElementById('mlp-play') as HTMLButtonElement | null;
+  const stepBtn = document.getElementById('mlp-step');
+  const resetBtn = document.getElementById('mlp-reset');
+  const moonsBtn = document.getElementById('mlp-moons');
+  const xorBtn = document.getElementById('mlp-xor');
+  const lr = document.getElementById('mlp-lr') as HTMLInputElement | null;
+  const lrVal = document.getElementById('mlp-lr-val');
+  const hidden = document.getElementById('mlp-hidden') as HTMLInputElement | null;
+  const hiddenVal = document.getElementById('mlp-hidden-val');
+  const stats = document.getElementById('mlp-stats');
+
+  if (canvas) {
+    const w = mountMlp(canvas, {
+      onStats(s: Stats) {
+        if (playBtn) playBtn.textContent = s.playing ? '⏸ Pause' : '▶ Play';
+        if (stats) {
+          stats.innerHTML =
+            `<span>loss = ${s.loss.toFixed(3)}</span>` +
+            `<span>acc = ${Math.round(s.acc * 100)}%</span>` +
+            `<span>step ${s.epoch}</span>`;
+        }
+      },
+    });
+
+    playBtn?.addEventListener('click', () => w.toggle());
+    stepBtn?.addEventListener('click', () => w.step());
+    resetBtn?.addEventListener('click', () => w.reset());
+    moonsBtn?.addEventListener('click', () => {
+      w.setMode('moons');
+      moonsBtn.classList.add('is-on');
+      xorBtn?.classList.remove('is-on');
+    });
+    xorBtn?.addEventListener('click', () => {
+      w.setMode('xor');
+      xorBtn.classList.add('is-on');
+      moonsBtn?.classList.remove('is-on');
+    });
+    lr?.addEventListener('input', () => {
+      const v = Number(lr.value);
+      w.setLearningRate(v);
+      if (lrVal) lrVal.textContent = v.toFixed(2);
+    });
+    hidden?.addEventListener('input', () => {
+      const v = Number(hidden.value);
+      w.setHidden(v);
+      if (hiddenVal) hiddenVal.textContent = String(v);
+    });
+  }
+</script>
+
+<style>
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    justify-content: center;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.85rem;
+  }
+  .controls button {
+    padding: 0.35rem 0.9rem;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-bg);
+    color: var(--color-text);
+    cursor: pointer;
+  }
+  .controls button:hover {
+    border-color: var(--viz-accent);
+    color: var(--viz-accent);
+  }
+  .seg { display: inline-flex; }
+  .seg__btn { border-radius: 0; }
+  .seg__btn:first-child { border-radius: 6px 0 0 6px; }
+  .seg__btn:last-child { border-radius: 0 6px 6px 0; border-left: none; }
+  .seg__btn.is-on {
+    background: var(--viz-accent);
+    color: #fff;
+    border-color: var(--viz-accent);
+  }
+  .ctl {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--color-muted);
+  }
+  .ctl input { accent-color: var(--viz-accent); }
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: center;
+    font-size: 0.85rem;
+    color: var(--color-muted);
+  }
+  .mono {
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  }
+</style>

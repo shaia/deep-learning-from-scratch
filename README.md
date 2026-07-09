@@ -41,11 +41,11 @@ tools/       build & render helpers
 
 ## Status
 
-Bootstrapping. See the per-module status tracker in
-[`docs/CURRICULUM.md`](docs/CURRICULUM.md). First milestone: **Module 00 (Perceptron)**
-end-to-end through the full toolchain.
+**Module 00 (Perceptron)** is complete end-to-end through the full toolchain — C, Python,
+notebook, tests, animation, widget, and post. **Module 01 (MLP + Backpropagation)** follows.
+See the per-module status tracker in [`docs/CURRICULUM.md`](docs/CURRICULUM.md).
 
-## Getting started (once scaffolding lands)
+## Getting started
 
 ```bash
 # C (standalone early modules)

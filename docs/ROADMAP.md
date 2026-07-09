@@ -48,8 +48,7 @@ The deliverable is a linear, blog-style static site that reads like a book.
 ## Repository structure
 
 ```
-depth-learning-from-scratch/
-├─ CLAUDE.md                     # project conventions
+deep-learning-from-scratch/
 ├─ README.md
 ├─ docs/
 │  ├─ ROADMAP.md                 # this file
@@ -101,7 +100,7 @@ MDX blog post · C↔Py agreement test.**
 
 ## Execution roadmap (phased)
 
-- **Phase 0 — Scaffolding.** Repo skeleton, `CLAUDE.md`, `docs/`, Astro skeleton, `CMakeLists.txt`, Manim config, `data/` scripts, Python venv. *(docs core: done; toolchain installs: pending)*
+- **Phase 0 — Scaffolding.** Repo skeleton, `docs/`, Astro skeleton, `CMakeLists.txt`, Manim config, `data/` scripts, Python venv. *(docs core: done; toolchain installs: pending)*
 - **Phase 1 — Tracer bullet: Module 00 Perceptron, full stack.** De-risks the entire toolchain before scaling.
 - **Phase 2 — Foundations.** Modules 01–02; stand up shared `nanograd`.
 - **Phase 3 — Vision era.** Modules 03–05.
