@@ -6,7 +6,7 @@ import rehypeKatex from 'rehype-katex';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // No custom domain yet: the book is served from the GitHub Pages *project page*
-// at https://shaia.github.io/depth-learning-from-scratch/. `site` is the origin
+// at https://shaia.github.io/deep-learning-from-scratch/. `site` is the origin
 // (used for canonical links + sitemap); `base` is the sub-path the repo lives
 // under and must match the repo name.
 // When a custom subdomain is ready: set SITE_URL to it, change `base` back to
@@ -19,7 +19,7 @@ export default defineConfig({
   site: SITE_URL,
   // Project page → the site lives under /<repo>/, not the domain root. Internal
   // links/assets use import.meta.env.BASE_URL so they resolve under this base.
-  base: '/depth-learning-from-scratch/',
+  base: '/deep-learning-from-scratch/',
   integrations: [mdx()],
   markdown: {
     // KaTeX: remark-math parses `$…$` / `$$…$$`, rehype-katex renders it to HTML.
