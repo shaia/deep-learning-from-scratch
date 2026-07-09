@@ -32,3 +32,6 @@ data/**/cifar*/
 # ── OS / editor ──
 .DS_Store
 Thumbs.db
+
+# ── Claude Code (local assistant config, kept out of the repo) ──
+.claude/
