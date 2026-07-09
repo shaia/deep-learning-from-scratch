@@ -23,7 +23,9 @@ prepended. See [`docs/CURRICULUM.md`](docs/CURRICULUM.md) for the full module li
 C forces the ideas into the open — no autograd, no hidden broadcasting, just arrays and the
 chain rule written out. Python (NumPy) mirrors the same structure so you can read them side by
 side, and lets us scale to real datasets comfortably. Neither leans on a deep-learning
-framework for the teaching path; PyTorch appears only to *validate* our from-scratch results.
+framework for the mechanism itself; each notebook then closes with a "framework mirrors"
+section that teaches how PyTorch, TensorFlow, and Keras express the same idea — and uses
+them to validate the from-scratch results.
 
 ## Repository layout
 
@@ -56,4 +58,4 @@ python topics/00-perceptron/python/perceptron.py
 cd site && npm install && npm run dev
 ```
 
-See [`CLAUDE.md`](CLAUDE.md) for full build/run commands and conventions.
+See [`docs/`](docs/) for the roadmap, curriculum, and per-area conventions.

@@ -5,19 +5,21 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FILL-IN: set this to the real custom subdomain the book is served from.
-// It must be a full, valid URL (used for canonical links + sitemap).
-// The same host also lives in `public/CNAME` and your DNS CNAME record.
+// No custom domain yet: the book is served from the GitHub Pages *project page*
+// at https://shaia.github.io/depth-learning-from-scratch/. `site` is the origin
+// (used for canonical links + sitemap); `base` is the sub-path the repo lives
+// under and must match the repo name.
+// When a custom subdomain is ready: set SITE_URL to it, change `base` back to
+// '/', and re-add `public/CNAME` (+ the DNS record).
 // ─────────────────────────────────────────────────────────────────────────────
-const SITE_URL = 'https://book.example.com';
+const SITE_URL = 'https://shaia.github.io';
 
 // https://astro.build/config
 export default defineConfig({
   site: SITE_URL,
-  // Custom subdomain → the book is served from the domain root, so base is '/'.
-  // (If you ever fall back to a project page at user.github.io/<repo>/,
-  //  change this to '/<repo>/' and rebuild.)
-  base: '/',
+  // Project page → the site lives under /<repo>/, not the domain root. Internal
+  // links/assets use import.meta.env.BASE_URL so they resolve under this base.
+  base: '/depth-learning-from-scratch/',
   integrations: [mdx()],
   markdown: {
     // KaTeX: remark-math parses `$…$` / `$$…$$`, rehype-katex renders it to HTML.

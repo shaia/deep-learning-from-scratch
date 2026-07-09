@@ -10,6 +10,7 @@ __pycache__/
 venv/
 .mypy_cache/
 .pytest_cache/
+.ipynb_checkpoints/
 
 # ── C / build ──
 build/
@@ -18,6 +19,19 @@ build/
 *.exe
 *.out
 
+# ── Manim render cache (keep only the final mp4s copied into site/public/media) ──
+topics/**/anim/media/
+animations/media/
+
+# ── Datasets (downloaded on demand by scripts in data/) ──
+data/**/*.gz
+data/**/*.idx*
+data/**/*.bin
+data/**/cifar*/
+
 # ── OS / editor ──
 .DS_Store
 Thumbs.db
+
+# ── Claude Code (local assistant config, kept out of the repo) ──
+.claude/

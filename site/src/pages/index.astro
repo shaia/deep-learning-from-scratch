@@ -28,7 +28,7 @@ const posts = (await getCollection('posts', ({ data }) => !data.draft)).sort(
       <ol class="toc">
         {posts.map((post) => (
           <li class="toc__item">
-            <a href={`/posts/${post.slug}/`} class="toc__link">
+            <a href={`${import.meta.env.BASE_URL}posts/${post.slug}/`} class="toc__link">
               <span class="toc__num">
                 {String(post.data.moduleNumber).padStart(2, '0')}
               </span>

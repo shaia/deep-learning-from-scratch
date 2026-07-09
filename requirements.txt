@@ -1,0 +1,26 @@
+# Python environment for "Deep Learning From Scratch".
+# Create a venv and install:  python -m venv .venv && .venv\Scripts\activate && pip install -r requirements.txt
+#
+# From-scratch teaching code uses only NumPy; matplotlib is for quick/inline plots;
+# manim renders the narrated animations. Jupyter runs each module's notebook.ipynb.
+
+# --- core: from-scratch numerics + plots ---
+numpy
+matplotlib
+
+# --- animation ---
+manim
+
+# --- notebooks (one notebook.ipynb per module) ---
+jupyterlab
+nbconvert
+ipykernel
+ipywidgets            # optional in-notebook sliders; notebooks run without it too
+
+# --- framework mirrors (each notebook's closing section: teaches framework usage + validates results) ---
+# PyTorch strictly validates the from-scratch results; TensorFlow + Keras mirror the same
+# model idiomatically with result-level checks. pip installs CPU-only builds on Windows
+# (plenty for these checks). Python 3.13 needs TF >= 2.20.
+torch
+tensorflow
+keras
