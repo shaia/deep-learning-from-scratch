@@ -30,7 +30,10 @@ The deliverable is a linear, blog-style static site that reads like a book.
 ### Additional defaults
 - **C:** C11, only `libm`. Build via **CMake** (clang toolchain) + one-line compile for standalone topics.
 - **Python:** `venv` + **NumPy** for from-scratch code; `matplotlib` for quick plots; `manim` for animation.
-  **PyTorch only in optional "validation" cells** to cross-check from-scratch gradients/outputs.
+  **PyTorch/TensorFlow/Keras in each notebook's closing "framework mirrors" section** — it
+  teaches how to work with each framework (the module's idea expressed idiomatically —
+  principles, not production code) and validates the from-scratch results (PyTorch strictly;
+  TF/Keras at result level). The mechanism itself is taught from scratch first.
 - **Widgets:** vanilla **TypeScript + Canvas/SVG**, no heavy UI framework.
 - **Math notation:** KaTeX; one shared notation guide (`conventions/math-notation.md`).
 

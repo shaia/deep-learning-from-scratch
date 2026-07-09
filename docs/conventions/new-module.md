@@ -13,8 +13,8 @@ Work in order — the code comes before the prose, the prose before the polish.
 ## 1. Python reference first
 
 NumPy is the fastest place to get the math right. Implement forward + backward from scratch,
-mirror the intended C structure, train on the **toy** problem, confirm it learns. Add an
-optional PyTorch validation cell to cross-check gradients if the module is nontrivial.
+mirror the intended C structure, train on the **toy** problem, confirm it learns. The
+notebook's framework-mirrors section (§1b) will cross-check these results with PyTorch.
 
 ## 1b. Notebook
 
@@ -28,8 +28,16 @@ and the module's **intuition → math → code → play** order:
 2. **Verify** at the end: import the canonical `python/NN.py` and `assert` the inline results
    match it to a tight tolerance — this is what keeps the notebook from silently drifting from
    the C↔Python source of truth. If they diverge, the cell fails loudly.
-3. Keep it dependency-light (numpy + matplotlib); guard any `ipywidgets`/`torch` cell in
-   `try/except` so the notebook still runs top-to-bottom without them.
+3. **Framework mirrors** as the closing section: a **PyTorch** cell that *strictly*
+   cross-checks the from-scratch results (gradients/outputs; `1e-12` where the arithmetic is
+   exact), then **TensorFlow** and **Keras** cells rebuilding the same model idiomatically
+   with reaches-the-same-result asserts (e.g. accuracy thresholds). Follow Module 00's §9.
+   The section teaches how to work with each framework — the module's idea expressed
+   idiomatically (principles, not production code) — on top of validating the from-scratch
+   build; the mechanism itself is taught from scratch first.
+4. Keep the teaching cells dependency-light (numpy + matplotlib). Only `ipywidgets` cells stay
+   guarded in `try/except` (optional sliders); framework cells run **unguarded** — the deps
+   are required ([`requirements.txt`](../../requirements.txt)) and their asserts must always run.
 
 Commit the notebook **executed with outputs** so the plots render on GitHub.
 
@@ -98,7 +106,7 @@ Astro URL, and record the teaser link in `ghostUrl`. Full flow: [`publishing.md`
 - Link the post into the site index/nav; cross-link neighbors.
 - Point `topics/NN-slug/README.md` at the post and list build/run commands.
 - Run the **checks**: C runs · Python matches · agreement/gradient test passes ·
-  notebook runs top-to-bottom clean
+  notebook runs top-to-bottom clean, including the framework-mirrors asserts
   (`jupyter nbconvert --to notebook --execute --inplace topics/NN-slug/notebook.ipynb`) ·
   assignment is solvable (a filled copy runs clean; see [`assignment.md`](assignment.md)) ·
   `npm run build` succeeds · Manim scene renders.

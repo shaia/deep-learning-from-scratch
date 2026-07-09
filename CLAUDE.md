@@ -60,9 +60,13 @@ Early modules (00–01) use **standalone single-file C** for zero indirection. F
 - **Site dev / build:** `cd site && npm run dev` / `npm run build`
 - **Render a Manim scene:** `manim -qm topics/00-perceptron/anim/scene.py SceneName`
 
-Python lives in a `venv` with `numpy`, `matplotlib`, `manim` (see `requirements.txt`).
-**PyTorch is only allowed in optional "validation" cells** that cross-check our from-scratch
-gradients — never as the teaching implementation.
+Python lives in a `venv` with `numpy`, `matplotlib`, `manim`, plus `torch`, `tensorflow`,
+`keras` (see `requirements.txt`).
+**Frameworks (PyTorch/TensorFlow/Keras) live in each notebook's closing "framework mirrors"
+section, which teaches two things**: how to work with each framework — the module's idea
+expressed idiomatically in torch/TF/Keras (principles, not production code) — and that the
+from-scratch results hold up (PyTorch checks strictly, TF/Keras at result level). The
+mechanism itself is always taught from scratch first.
 
 ## Coding conventions
 

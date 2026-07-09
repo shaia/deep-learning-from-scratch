@@ -17,5 +17,10 @@ nbconvert
 ipykernel
 ipywidgets            # optional in-notebook sliders; notebooks run without it too
 
-# --- optional: PyTorch validation cells only (never the teaching implementation) ---
-# torch
+# --- framework mirrors (each notebook's closing section: teaches framework usage + validates results) ---
+# PyTorch strictly validates the from-scratch results; TensorFlow + Keras mirror the same
+# model idiomatically with result-level checks. pip installs CPU-only builds on Windows
+# (plenty for these checks). Python 3.13 needs TF >= 2.20.
+torch
+tensorflow
+keras
