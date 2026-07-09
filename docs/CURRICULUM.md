@@ -11,7 +11,7 @@ agreement/gradient test · post builds · animation renders.
 | # | Module | C | Py | NB | Asgn | Test | Anim | Widget | Post | Status |
 |---|--------|:-:|:--:|:--:|:----:|:----:|:----:|:------:|:----:|:------:|
 | 00 | Perceptron | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
-| 01 | MLP + Backpropagation | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
+| 01 | MLP + Backpropagation | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
 | 02 | Training toolkit (init/opt/reg) | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 | 03 | Convolutions / LeNet-5 | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 | 04 | AlexNet | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
