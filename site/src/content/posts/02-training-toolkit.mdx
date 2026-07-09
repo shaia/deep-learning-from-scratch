@@ -1,0 +1,206 @@
+---
+title: Training Toolkit
+moduleNumber: 2
+description: Backprop learns, but slowly and fragilely. This is the box of tricks that made it fast — non-saturating ReLU, fan-in-scaled He/Xavier initialization, the optimizer lineage SGD → momentum → RMSProp → Adam, and L2 / early stopping. We build them into a shared from-scratch library, nanograd, and prove our Adam is byte-for-byte PyTorch's.
+draft: false
+---
+
+import OptimizerWidget from '../../components/viz/OptimizerWidget.astro';
+
+## "It learns" is not "it learns fast"
+
+Module 01 ended in triumph and a confession. The triumph: backpropagation, derived by
+hand, trained a network that cleared the XOR wall and went on to hit 97% on MNIST. The
+confession was buried in the details — a learning rate we picked by feel (`0.5`), a weight
+init drawn from a plain uniform `[-1, 1)`, and saturating sigmoids. On a 2→4→1 toy none of
+that bites. Make the network deeper and every one of those choices turns from harmless to
+fatal: the sigmoids flatten out and stop passing gradient, the wrong init scale makes the
+signal explode or vanish before it reaches the end, and plain gradient descent crawls along
+curved valleys it should cut straight across.
+
+This chapter is the **toolkit** the field assembled, mostly between 1998 and 2015, to fix
+exactly those failures — and make training something you can *trust* instead of *tune*.
+There is no single grand idea here like backprop; there are four small, sharp ones, and each
+is only a few lines of code on top of what we already have:
+
+| Problem in Module 01 | Fix | Who |
+|----------------------|-----|-----|
+| Sigmoids saturate → gradient dies | **ReLU** (and friends) | Nair & Hinton 2010 |
+| Wrong init scale → signal explodes/vanishes | **Xavier / He** initialization | Glorot 2010 · He 2015 |
+| One global learning rate, slow valleys | **momentum → RMSProp → Adam** | Polyak 1964 · Hinton 2012 · Kingma 2014 |
+| Big net memorizes small data | **L2 weight decay · early stopping** | — |
+
+And because these pieces recur in every module from here on, this is where we stop writing
+one-off networks and stand up a small shared library: **`nanograd`**. It is *not* an autograd
+engine — every layer's backward pass is still the Module-01 chain rule, written out by hand.
+We are just packaging what we already understand so we can reuse it.
+
+## Idea 1 — activations: the slope is the whole story
+
+An activation function does two jobs. Forward, it bends the linear map into a curve. Backward,
+its **derivative multiplies every gradient that flows through it** — so wherever that slope is
+near zero, learning silently stops. That one sentence explains the shift from sigmoid to ReLU.
+
+$$\sigma'(z) = \sigma(z)\,(1-\sigma(z)) \le \tfrac14, \qquad \tanh'(z) = 1 - \tanh^2 z, \qquad \mathrm{ReLU}'(z) = \mathbb{1}[z > 0].$$
+
+Sigmoid's derivative peaks at a mere `0.25` and collapses toward `0` once `|z| ≳ 4` — its
+neurons **saturate**, and a saturated neuron is a closed gate. Stack a few layers of them and
+the product of those small slopes drives the gradient to nothing (the *vanishing gradient*).
+ReLU's positive-side slope is a flat **1**, however large `z` grows: the gate stays open. That
+single property, more than anything else, is what later let networks go genuinely deep.
+
+## Idea 2 — initialization: keep the signal alive
+
+If activations decide whether a *single* layer passes gradient, initialization decides whether
+the *whole stack* does. Push a random input through a deep network and track the standard
+deviation of the activations layer by layer. Too-large initial weights and it grows without
+bound (and tanh saturates); too-small and it decays toward zero. Either way, the gradient —
+which rides the same scale on the way back — is useless before it reaches the front.
+
+Glorot & Bengio's fix (2010) is almost embarrassingly simple: scale the initial weights by the
+**fan-in** so the variance stays put from layer to layer.
+
+$$\textbf{Xavier (tanh/sigmoid): } \operatorname{Var}(W) = \frac{1}{n_\text{in}} \qquad\qquad \textbf{He (ReLU): } \operatorname{Var}(W) = \frac{2}{n_\text{in}}.$$
+
+He's extra factor of `2` accounts for ReLU zeroing out half its inputs. In the notebook you
+can watch a 6-layer tanh stack's activation std stay flat under Xavier and quietly die under
+the Module-01 `[-1,1)` uniform — the same plot Glorot used to make the case.
+
+## Idea 3 — optimizers: give the step a memory
+
+Plain SGD, $\theta \leftarrow \theta - \eta\,g$, treats every parameter the same and remembers
+nothing. Three refinements, each a couple of lines on the last, fix its worst habits:
+
+$$\textbf{momentum: } v \leftarrow \mu v + g,\ \ \theta \mathrel{-}= \eta v \qquad \textbf{RMSProp: } s \leftarrow \beta s + (1-\beta)g^2,\ \ \theta \mathrel{-}= \frac{\eta\,g}{\sqrt{s}+\epsilon}$$
+
+Momentum accumulates a velocity, so consistent directions build speed and oscillations across
+a valley cancel. RMSProp divides each coordinate's step by a running RMS of *its own* gradient
+— a per-parameter learning rate that shrinks where gradients are wild and grows where they're
+timid. **Adam** (Kingma & Ba 2014) is simply *both at once*, plus a bias-correction so the
+running averages aren't dragged toward their zero start:
+
+$$m \leftarrow \beta_1 m + (1-\beta_1)g,\quad v \leftarrow \beta_2 v + (1-\beta_2)g^2,\quad \hat m = \frac{m}{1-\beta_1^{\,t}},\ \hat v = \frac{v}{1-\beta_2^{\,t}},\quad \theta \mathrel{-}= \frac{\eta\,\hat m}{\sqrt{\hat v}+\epsilon}.$$
+
+It is the default optimizer of modern deep learning, and it is *nine lines of arithmetic*.
+
+## Idea 4 — regularization: trade a little training loss for generalization
+
+Give a big network a small, noisy dataset and it will memorize it — training loss keeps
+falling while validation loss turns back up. **L2 weight decay** adds
+$\tfrac{\lambda}{2}\lVert\theta\rVert^2$ to the loss, i.e. a $\lambda\theta$ term on every
+gradient, pulling weights toward zero so the fit stays smooth; it is one keyword,
+`weight_decay`, on any of the optimizers above. **Early stopping** just halts at the
+validation minimum. Neither is glamorous; both are always on in practice.
+
+## The code: from scratch, and still bit-for-bit
+
+Everything above lives in [`lib/*/nanograd`](https://github.com/shaia/deep-learning-from-scratch/tree/main/lib).
+The refactor changes nothing about the math — a `Linear` layer's `backward` is the same
+`dW = Xᵀ dY` we derived last time — it just gives each operation a home. Here is the whole Adam
+step, the module's centerpiece, side by side. The project's contract (pedagogy principle #3)
+still holds: the **C and Python produce the same numbers**, now even through 2000 Adam updates.
+
+```python
+# lib/python/nanograd/optim.py — Adam.step, over parallel param/grad lists
+self.t += 1
+b1c = 1.0 - self.beta1 ** self.t          # bias-correction denominators
+b2c = 1.0 - self.beta2 ** self.t
+for i, (p, g) in enumerate(zip(params, grads)):
+    self.m[i] = self.beta1 * self.m[i] + (1.0 - self.beta1) * g
+    self.v[i] = self.beta2 * self.v[i] + (1.0 - self.beta2) * (g * g)
+    m_hat = self.m[i] / b1c
+    v_hat = self.v[i] / b2c
+    p -= self.lr * m_hat / (np.sqrt(v_hat) + self.eps)   # in-place update
+```
+
+```c
+/* lib/c/nanograd/optim.c — ng_adam_step; b1c/b2c passed in, tracked by the caller */
+for (int i = 0; i < n; i++) {
+    double gi = g[i];
+    m[i] = beta1 * m[i] + (1.0 - beta1) * gi;
+    v[i] = beta2 * v[i] + (1.0 - beta2) * (gi * gi);
+    double m_hat = m[i] / b1c;
+    double v_hat = v[i] / b2c;
+    p[i] -= lr * m_hat / (sqrt(v_hat) + eps);
+}
+```
+
+The agreement test trains the identical `2→8→2` ReLU/He network on XOR in both languages and
+matches every parameter to about `1e-14` — comfortably inside the `1e-9` gate. (The only drift
+is last-bit rounding in `exp`/`log`/`sqrt` across the two math libraries, exactly as in Module
+01.) The notebook then goes further and checks our optimizer against the real thing:
+
+> Our `nanograd.Adam` and `torch.optim.Adam`, run from the same weights on the same gradients,
+> agree to a relative error of **`1e-16`** — they are the same nine lines. And every gradient
+> our hand-written layers produce matches PyTorch's autograd to `~1e-14`. There is only one
+> right answer, and the from-scratch code lands on it.
+
+## Play with it
+
+The four update rules, racing down a loss surface from the same start. On the **Beale valley**,
+plain SGD (red) barely moves while Adam (purple) and RMSProp (green) adapt their step and steer
+in; switch to the **ravine** — an ill-conditioned bowl — to watch SGD zig-zag across the steep
+direction while momentum (amber) powers straight down it. Drag the learning-rate scale to find
+where SGD finally keeps up, or where Adam overshoots. Click anywhere to drop a new start point.
+
+<OptimizerWidget />
+
+That gap between the red trail and the purple one *is* the reason nobody hand-tunes a single
+learning rate anymore. The adaptive methods effectively tune one per parameter, every step.
+
+## Watch it
+
+The same two ideas, animated: first the real `nanograd` optimizers descending the Beale
+surface, then a signal pushed through a deep tanh stack — decaying under a bad init, holding
+steady under a scaled one.
+
+<figure>
+  <video controls playsinline preload="metadata" width="720" style="max-width:100%;height:auto;border-radius:8px">
+    <source src={`${import.meta.env.BASE_URL}media/02-training-toolkit.mp4`} type="video/mp4" />
+    Your browser does not support the video tag.
+  </video>
+  <figcaption style="font-size:0.85rem;color:var(--color-muted);margin-top:0.5rem">
+    Left beat: SGD, momentum, and Adam descend the Beale valley from one start — Adam steers
+    straight for the minimum. Right beat: activation std through a deep tanh stack, decaying
+    under small-uniform init and holding under Xavier.
+  </figcaption>
+</figure>
+
+## Toy to real: the toolkit on MNIST
+
+XOR proves the machinery; MNIST proves it scales. The same `784 → 128 → 10` network as Module
+01, now with **ReLU/He** and trained by **Adam** — no learning-rate babysitting — crosses 95%
+in a couple of epochs and settles near **96.5%** at eight. The
+[notebook](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/02-training-toolkit/notebook.ipynb)
+trains it end to end, then rebuilds the same net idiomatically in TensorFlow (a `GradientTape`
++ Adam) and Keras (He init, Adam, and an L2 penalty in three lines), which lands at 97%.
+
+## Exercises & what's next
+
+1. **Saturate a sigmoid on purpose.** In the widget's terms: a sigmoid unit with large weights
+   sits in its flat tails. Relate that to the `≤ 0.25` bound on `σ'` — how many saturated
+   layers does it take to kill a gradient?
+2. **Break He init.** In the notebook, swap `he` for `small` on the deep ReLU net and watch the
+   activation-std plot collapse. Then try `xavier` — why does it under-shoot for ReLU?
+3. **Find SGD's learning rate.** In the widget, crank the lr scale until plain SGD keeps up with
+   Adam on the ravine. What happens to Adam at that same scale?
+4. **Turn off bias-correction.** In [`assignment.ipynb`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/02-training-toolkit/assignment.ipynb),
+   drop the `1 - β^t` terms from your Adam step and watch the first few updates explode — that
+   is the correction earning its keep.
+
+Then go deeper into the running code: the self-verifying
+[`notebook.ipynb`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/02-training-toolkit/notebook.ipynb)
+rebuilds every plot above and cross-checks against PyTorch/TF/Keras, while
+[`assignment.ipynb`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/02-training-toolkit/assignment.ipynb)
+hands you the three load-bearing pieces — ReLU, He init, the Adam step — to implement yourself,
+graded against a gradient check and the canonical library. All of it lives in
+[`topics/02-training-toolkit/`](https://github.com/shaia/deep-learning-from-scratch/tree/main/topics/02-training-toolkit).
+
+We can now train a network of almost any shape, quickly and robustly. But we are still feeding
+images to it as `784` loose, unrelated pixels — throwing away the single most important fact
+about a picture, that nearby pixels belong together. Fixing that is the next chapter.
+
+---
+
+*Next: [Convolutions / LeNet-5 →](/posts/03-lenet/) — locality and weight sharing, the
+architecture that finally understood that an image is not a list of numbers.*

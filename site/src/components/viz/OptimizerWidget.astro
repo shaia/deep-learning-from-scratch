@@ -1,0 +1,160 @@
+---
+// Module 02's interactive: race SGD, momentum, RMSProp, and Adam down a 2-D loss
+// surface from a shared start. The same four update rules as lib/*/nanograd.
+// Embed in MDX with:
+//   import OptimizerWidget from '../../components/viz/OptimizerWidget.astro'
+import WidgetFrame from './WidgetFrame.astro';
+---
+
+<WidgetFrame
+  title="Race the optimizers"
+  caption="Press Play to send all four down the loss surface from the same point. Plain SGD (red) crawls or zig-zags; momentum (amber) builds speed; RMSProp (green) and Adam (purple) adapt their step per-coordinate and head for the minimum (the dark dot). Drag the learning-rate scale, switch surfaces, or click anywhere to drop a new start point."
+  alt="A shaded 2D loss surface with four colored dots descending from a shared start, each leaving a trail. On the curved Beale valley and the narrow ravine, the adaptive optimizers reach the minimum well before plain SGD."
+>
+  <canvas
+    id="opt-canvas"
+    width="640"
+    height="384"
+    style="max-width:100%;height:auto;cursor:crosshair"></canvas>
+
+  <div class="controls">
+    <button id="opt-play" type="button">▶ Play</button>
+    <button id="opt-step" type="button">Step</button>
+    <button id="opt-reset" type="button">Reset</button>
+    <div class="seg" role="group" aria-label="Loss surface">
+      <button id="opt-beale" type="button" class="seg__btn is-on">Beale valley</button>
+      <button id="opt-ravine" type="button" class="seg__btn">Ravine</button>
+    </div>
+    <label class="ctl">
+      lr scale
+      <input id="opt-lr" type="range" min="0.2" max="3" step="0.1" value="1" />
+      <span id="opt-lr-val" class="mono">1.0×</span>
+    </label>
+  </div>
+
+  <div class="legend mono" aria-hidden="true">
+    <span><i style="background:#d81b60"></i>SGD</span>
+    <span><i style="background:#f2a900"></i>momentum</span>
+    <span><i style="background:#009e73"></i>RMSProp</span>
+    <span><i style="background:#6d4aff"></i>Adam</span>
+  </div>
+
+  <div id="opt-stats" class="stats mono" aria-live="polite">
+    <span>closest: —</span>
+    <span>dist 0.00</span>
+    <span>step 0</span>
+  </div>
+</WidgetFrame>
+
+<script>
+  import { mountOptimizer, type Stats } from './optimizerCore';
+
+  const canvas = document.getElementById('opt-canvas') as HTMLCanvasElement | null;
+  const playBtn = document.getElementById('opt-play') as HTMLButtonElement | null;
+  const stepBtn = document.getElementById('opt-step');
+  const resetBtn = document.getElementById('opt-reset');
+  const bealeBtn = document.getElementById('opt-beale');
+  const ravineBtn = document.getElementById('opt-ravine');
+  const lr = document.getElementById('opt-lr') as HTMLInputElement | null;
+  const lrVal = document.getElementById('opt-lr-val');
+  const stats = document.getElementById('opt-stats');
+
+  if (canvas) {
+    const w = mountOptimizer(canvas, {
+      onStats(s: Stats) {
+        if (playBtn) playBtn.textContent = s.playing ? '⏸ Pause' : '▶ Play';
+        if (stats) {
+          stats.innerHTML =
+            `<span>closest: ${s.closest}</span>` +
+            `<span>dist ${s.dist.toFixed(2)}</span>` +
+            `<span>step ${s.step}</span>`;
+        }
+      },
+    });
+
+    playBtn?.addEventListener('click', () => w.toggle());
+    stepBtn?.addEventListener('click', () => w.step());
+    resetBtn?.addEventListener('click', () => w.reset());
+    bealeBtn?.addEventListener('click', () => {
+      w.setSurface('beale');
+      bealeBtn.classList.add('is-on');
+      ravineBtn?.classList.remove('is-on');
+    });
+    ravineBtn?.addEventListener('click', () => {
+      w.setSurface('ravine');
+      ravineBtn.classList.add('is-on');
+      bealeBtn?.classList.remove('is-on');
+    });
+    lr?.addEventListener('input', () => {
+      const v = Number(lr.value);
+      w.setLearningRate(v);
+      if (lrVal) lrVal.textContent = v.toFixed(1) + '×';
+    });
+  }
+</script>
+
+<style>
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    justify-content: center;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.85rem;
+  }
+  .controls button {
+    padding: 0.35rem 0.9rem;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-bg);
+    color: var(--color-text);
+    cursor: pointer;
+  }
+  .controls button:hover {
+    border-color: var(--viz-accent);
+    color: var(--viz-accent);
+  }
+  .seg { display: inline-flex; }
+  .seg__btn { border-radius: 0; }
+  .seg__btn:first-child { border-radius: 6px 0 0 6px; }
+  .seg__btn:last-child { border-radius: 0 6px 6px 0; border-left: none; }
+  .seg__btn.is-on {
+    background: var(--viz-accent);
+    color: #fff;
+    border-color: var(--viz-accent);
+  }
+  .ctl {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--color-muted);
+  }
+  .ctl input { accent-color: var(--viz-accent); }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: center;
+    font-size: 0.8rem;
+    color: var(--color-muted);
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+  .legend i {
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: center;
+    font-size: 0.85rem;
+    color: var(--color-muted);
+  }
+  .mono {
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  }
+</style>
