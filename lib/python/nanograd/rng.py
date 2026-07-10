@@ -20,8 +20,10 @@ _MASK64 = (1 << 64) - 1
 class Rng:
     """64-bit linear congruential generator (the glibc/PCG multiplier).
 
-    State is held on the instance (never a module global) so the generator is
-    thread-safe and reads like the C `Rng` struct it mirrors.
+    State is held on the instance (never a module global), so independent
+    instances never interfere and the class reads like the C `Rng` struct it
+    mirrors. A single instance is not synchronized -- don't share one across
+    threads.
     """
 
     def __init__(self, seed: int):
