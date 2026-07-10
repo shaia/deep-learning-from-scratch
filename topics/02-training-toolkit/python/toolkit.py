@@ -288,7 +288,7 @@ def train(net, opt, Xtr, ytr, epochs, batch_size=32, seed=0,
         idx = rng.permutation(n)
         for s in range(0, n, batch_size):
             b = idx[s:s + batch_size]
-            L = loss_layer.forward(net.forward(Xtr[b]), ytr[b])
+            loss_layer.forward(net.forward(Xtr[b]), ytr[b])
             net.backward(loss_layer.backward())
             opt.step(net.params(), net.grads())
         if record:
