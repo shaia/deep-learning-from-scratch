@@ -17,7 +17,7 @@ is verified to be byte-for-byte PyTorch's, and the C and Python impls agree to ~
 |------|------|
 | `../../lib/python/nanograd/` | Shared NumPy library: `layers` (Linear/Sigmoid/Tanh/ReLU/SoftmaxCE), `init` (xavier/he), `optim` (SGD/RMSProp/Adam), `net` (Sequential/mlp), `rng` |
 | `../../lib/c/nanograd/` | C mirror: `nn.c`, `init.c`, `optim.c`, `rng.c`, `nanograd.h` (a static lib) |
-| `python/toolkit.py` | Canonical: a bit-exact `2→8→2` ReLU/He/Adam toy on XOR, plus vectorized optimizer/init ablations and MNIST |
+| `python/toolkit.py` | Canonical: a line-for-line mirrored `2→8→2` ReLU/He/Adam toy on XOR, plus vectorized optimizer/init ablations and MNIST |
 | `c/toolkit.c` | The C toy, **linking nanograd** (first module to do so) — same seed/op order as the Python |
 | `notebook.ipynb` | Cell-by-cell walkthrough: activations, init, optimizers on a loss surface, ablations, L2/early-stop, MNIST, framework mirrors |
 | `assignment.ipynb` | Hands-on: you implement **ReLU**, **He init**, and the **Adam step** in `# TODO` blocks; a gradient check grades you |
@@ -67,7 +67,8 @@ The rendered video is copied to `site/public/media/02-training-toolkit.mp4` and 
 This is the first module to link the shared **nanograd** library rather than being one standalone
 file — the refactor promised in `docs/conventions/c-style.md`. The library is deliberately *not* an
 autograd engine: every layer's `backward()` is the Module-01 chain rule, written out by hand and
-localized to one op. As in Module 01, the C↔Python gate is a small **bit-exact** path (the explicit
-scalar `ToyNet`, mirrored line-for-line by `c/toolkit.c`); the ablations and MNIST run on the
-vectorized NumPy library and are checked by a metric. Weight init is bit-exact across languages via
-a shared Box–Muller normal on the same 64-bit LCG.
+localized to one op. As in Module 01, the C↔Python gate is a small **line-for-line mirrored** path
+(the explicit scalar `ToyNet`, matched by `c/toolkit.c` within the `1e-9` gate — ≈`1e-14` observed,
+the only drift being last-ULP `exp`/`log`/`sqrt` rounding across the two math libraries); the
+ablations and MNIST run on the vectorized NumPy library and are checked by a metric. Weight init in
+both languages draws the same stream from a shared Box–Muller normal on the same 64-bit LCG.
