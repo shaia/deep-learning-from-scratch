@@ -279,7 +279,8 @@ def _make_optimizer(name, lr, weight_decay=0.0):
 def train(net, opt, Xtr, ytr, epochs, batch_size=32, seed=0,
           Xval=None, yval=None, record=False):
     """Mini-batch training loop over a nanograd net. Returns a history list of
-    (epoch, train_loss, val_acc) when `record`, else the final val accuracy."""
+    (epoch, train_loss, val_acc) when `record`, else the final accuracy on the
+    validation set (or on the training set when no validation set is given)."""
     loss_layer = SoftmaxCrossEntropy()
     rng = np.random.default_rng(seed)
     n = Xtr.shape[0]
@@ -295,9 +296,11 @@ def train(net, opt, Xtr, ytr, epochs, batch_size=32, seed=0,
             train_loss = loss_layer.forward(net.forward(Xtr), ytr)
             val_acc = _accuracy(net, Xval, yval) if Xval is not None else float("nan")
             history.append((e, train_loss, val_acc))
+    if record:
+        return history
     if Xval is not None:
-        return history if record else _accuracy(net, Xval, yval)
-    return history
+        return _accuracy(net, Xval, yval)
+    return _accuracy(net, Xtr, ytr)
 
 
 def _accuracy(net, X, y):
