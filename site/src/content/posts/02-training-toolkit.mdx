@@ -92,13 +92,14 @@ gradient, pulling weights toward zero so the fit stays smooth; it is one keyword
 `weight_decay`, on any of the optimizers above. **Early stopping** just halts at the
 validation minimum. Neither is glamorous; both are always on in practice.
 
-## The code: from scratch, and still bit-for-bit
+## The code: from scratch, and still in lockstep
 
 Everything above lives in [`lib/*/nanograd`](https://github.com/shaia/deep-learning-from-scratch/tree/main/lib).
 The refactor changes nothing about the math — a `Linear` layer's `backward` is the same
 `dW = Xᵀ dY` we derived last time — it just gives each operation a home. Here is the whole Adam
 step, the module's centerpiece, side by side. The project's contract (pedagogy principle #3)
-still holds: the **C and Python produce the same numbers**, now even through 2000 Adam updates.
+still holds: **C and Python agree to ~14 decimal places** — well inside the same `1e-9` gate
+as Module 01 — now even through 2000 Adam updates.
 
 ```python
 # lib/python/nanograd/optim.py — Adam.step, over parallel param/grad lists
