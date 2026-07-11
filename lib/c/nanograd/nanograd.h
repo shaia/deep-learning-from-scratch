@@ -1,7 +1,7 @@
 /* ============================================================================
  * nanograd -- the shared, from-scratch neural-net library for this book (C side).
  *
- * Introduced in Module 02 (the training toolkit) and grown module by module, in
+ * Introduced in Module 02 (Making Deep Nets Trainable) and grown module by module, in
  * lockstep with lib/python/nanograd. It is NOT an autograd engine: every
  * backward function is the chain rule written out by hand, localized to one
  * operation (Module 01 derived the whole thing once; here we just package it).

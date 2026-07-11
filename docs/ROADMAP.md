@@ -74,7 +74,7 @@ MDX blog post · C↔Py agreement test.**
 **Era 0 — Foundations & prehistory (1943–2006)**
 - **00 Perceptron** (McCulloch–Pitts 1943, Rosenblatt 1957) — linear unit, perceptron learning rule. Toy: linearly-separable blobs; the XOR wall. *(standalone C)*
 - **01 MLP + Backpropagation** (Rumelhart 1986) — hidden layers, chain rule by hand, SGD. Toy: XOR, two-moons. Real: MNIST. *(standalone C)*
-- **02 Training toolkit** (1990s–2000s) — activations, initialization, momentum → RMSProp → Adam, L2/early-stopping. *(begins shared `nanograd`)*
+- **02 Making deep nets trainable** (1990s–2000s) — activations, initialization, momentum → RMSProp → Adam, L2/early-stopping. *(begins shared `nanograd`)*
 
 **Era 1 — The vision revolution (1998–2015)**
 - **03 Convolutions / LeNet-5** (LeCun 1998) — conv, pooling, weight sharing. Real: MNIST.

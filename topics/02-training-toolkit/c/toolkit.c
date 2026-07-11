@@ -1,5 +1,5 @@
 /* ============================================================================
- * Module 02 — Training toolkit (initialization, optimizers, regularization)
+ * Module 02 — Making deep nets trainable (initialization, optimizers, regularization)
  *
  * The first topic to link the shared nanograd library (lib/c/nanograd) instead
  * of being one standalone file. It wires a 2->8->2 ReLU network with He

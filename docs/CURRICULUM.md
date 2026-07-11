@@ -12,7 +12,7 @@ agreement/gradient test · post builds · animation renders.
 |---|--------|:-:|:--:|:--:|:----:|:----:|:----:|:------:|:----:|:------:|
 | 00 | Perceptron | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
 | 01 | MLP + Backpropagation | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
-| 02 | Training toolkit (init/opt/reg) | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
+| 02 | Making deep nets trainable (init/opt/reg) | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
 | 03 | Convolutions / LeNet-5 | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 | 04 | AlexNet | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 | 05 | ResNet | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
@@ -45,7 +45,7 @@ Mechanism: hidden layer(s), nonlinearity, forward pass, backprop by hand, SGD.
 Toy: XOR (now solvable), two-moons. Real: MNIST (target ≥95%).
 Anim: gradients flowing backward; the two-moons boundary bending over epochs.
 
-**02 Training toolkit** — *The tricks that made deep nets trainable.*
+**02 Making deep nets trainable** — *The activations, initialization, optimizers, and regularizers that turn "it learns" into "it learns fast."*
 Mechanism: sigmoid/tanh/ReLU; init (Xavier/He); momentum → RMSProp → Adam; L2, early-stopping.
 Toy: same MLP, ablations. Anim: optimizer trajectories on a loss surface; init effects.
 *Introduces `lib/*/nanograd`.*

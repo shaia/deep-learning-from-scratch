@@ -1,5 +1,5 @@
 """
-Module 02 - Training toolkit: initialization, optimizers, regularization.
+Module 02 - Making deep nets trainable: initialization, optimizers, regularization.
 
 The Python mirror of topics/02-training-toolkit/c/toolkit.c, and the module that
 stands up the shared `nanograd` library (lib/python/nanograd). Module 01 proved

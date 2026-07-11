@@ -1,7 +1,7 @@
 """
 nanograd -- the shared, from-scratch neural-net library for this book.
 
-Introduced in Module 02 (the training toolkit) and grown module by module.
+Introduced in Module 02 (Making Deep Nets Trainable) and grown module by module.
 It is *not* an autograd engine: every layer's backward pass is the chain rule
 written out by hand (see layers.py). The library just packages the pieces
 Module 01 derived once, so later modules can stack and reuse them.
