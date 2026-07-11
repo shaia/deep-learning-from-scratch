@@ -1,7 +1,7 @@
 ---
 title: MLP + Backpropagation
 moduleNumber: 1
-description: The escape from the XOR wall — stack a hidden layer and learn it with the chain rule. We derive backpropagation by hand, prove the gradients correct against finite differences, solve XOR, bend a boundary around two moons, and hit 97% on MNIST — all from scratch in C and NumPy.
+description: The escape from the XOR wall — stack a hidden layer and learn it with the chain rule. We meet the loss-and-gradient framework the rest of the book lives in, derive backpropagation by hand from a single sigmoid slope to the general L-layer equations, watch hidden units invent a coordinate system in which XOR is easy, prove the gradients correct against finite differences, and hit 97% on MNIST — all from scratch in C and NumPy.
 draft: false
 ---
 
@@ -22,26 +22,54 @@ of a stack, because a hidden unit has no target of its own — no label says wha
 output.
 
 This chapter is the algorithm that supplies one. It has a name — **backpropagation** — and it is,
-underneath, nothing but the chain rule from calculus, applied with bookkeeping. It is the single
-most important algorithm in this entire book: every network that follows, up to the largest
-language models, is trained by exactly this idea.
+underneath, nothing but the chain rule from calculus, applied with bookkeeping. But to make the
+chain rule applicable at all, three other ideas have to arrive with it: a *smooth* neuron in
+place of Module 00's all-or-none step, a single number — a **loss** — that measures how wrong
+the whole network is, and **gradient descent**, the discipline of nudging every weight downhill
+on that number. Together they form the framework that every remaining chapter of this book lives
+inside. Every network that follows, up to the largest language models, is trained by exactly the
+machinery we are about to build by hand.
 
-### 1986: learning the hidden layer
+### An algorithm discovered four times
 
-The multilayer network and even the rough idea of propagating errors backward had floated around
-for years (Werbos had written it down in 1974). What changed in 1986 was clarity and momentum:
-David Rumelhart, Geoffrey Hinton, and Ronald Williams published *Learning Representations by
-Back-propagating Errors*, a short paper that stated the method cleanly, showed it *worked* on
-problems like XOR, and — crucially — framed the hidden units as learning useful **internal
-representations**. The connectionist winter that Minsky and Papert's *Perceptrons* had helped
-bring on thawed almost overnight.
+The strange thing about backpropagation is not that it was discovered — it is how many times it
+had to be discovered before anyone listened. The chain rule itself is three centuries old. The
+efficient trick at backprop's core — sweep *backward* through a composition, reusing shared
+subexpressions, so that all the derivatives together cost about as much as one forward pass —
+was published in 1970 by Seppo Linnainmaa, a Finnish master's student writing about the
+accumulation of rounding errors. His "reverse mode of automatic differentiation" is exactly
+backprop's engine, but it said nothing about neurons, and nobody training networks read it.
+
+In 1974 Paul Werbos put the pieces together explicitly. His Harvard PhD thesis, *Beyond
+Regression*, proposed training multilayer perceptrons by propagating derivatives backward — the
+whole idea, worked out, a decade early. It landed in silence. This was the depth of the
+connectionist winter; Minsky and Papert's *Perceptrons* had convinced the field that the whole
+direction was a dead end, and Werbos later recalled being unable to persuade anyone — including
+Minsky himself — that the two-layer objection had an answer. The result stayed buried in a
+thesis for ten years. In the mid-1980s the idea surfaced twice more, independently: David Parker
+in an MIT technical report (1985), and Yann LeCun — whom we will meet again in Module 03 — in a
+French conference paper the same year.
+
+What changed in 1986 was not the mathematics but the delivery. David Rumelhart, Geoffrey Hinton,
+and Ronald Williams — working within the *Parallel Distributed Processing* group, whose
+two-volume book that year re-founded connectionism — published a short paper in *Nature*
+titled *Learning Representations by Back-propagating Errors*. It stated the method cleanly,
+and, crucially, it *demonstrated* it. One demonstration became famous. They trained a network on
+two family trees — one English, one Italian, identical in structure — feeding it triples like
+"Colin's father is…" and asking it to fill in the person. Then they looked inside. Individual
+hidden units, which no one had programmed, had learned to encode *nationality*, *generation*,
+and *branch of the family* — precisely the features a human analyst would invent to solve the
+task. That is what the title meant: the hidden layer does not just compute, it learns
+**internal representations**. The framing stuck, the winter thawed, and "learning
+representations" became — and remains — the deepest one-line summary of what this field does.
 
 | Year | Milestone | What it added |
 |------|-----------|---------------|
 | 1969 | Minsky & Papert, *Perceptrons* | a proof of the single-layer wall (XOR) |
-| 1974 | Werbos | the chain-rule idea, buried in a thesis |
-| 1986 | Rumelhart, Hinton & Williams | backprop, stated clearly — and *it learns* |
-| next | Module 02 | the tricks that make it train *fast* |
+| 1970 | Linnainmaa | reverse-mode differentiation — the engine, minus the neurons |
+| 1974 | Werbos, *Beyond Regression* | backprop for networks, buried in a thesis |
+| 1985 | Parker; LeCun | two independent rediscoveries |
+| 1986 | Rumelhart, Hinton & Williams | stated cleanly, shown to work, framed as *representation learning* |
 
 ## The intuition: hidden units are learned features
 
@@ -49,58 +77,360 @@ Here is the whole idea in one sentence: **if one line is not enough, learn sever
 a line in the space of their answers.**
 
 Give the network a **hidden layer** of neurons. Each hidden unit is just a Module-00 neuron — a
-weighted sum through a sigmoid — so each one carves the input plane with its own soft line. For
-XOR, two hidden units are enough: one can learn "am I in the OR region?", the other "am I in the
-AND region?". In the new 2D space whose coordinates are *those two answers*, the four XOR points
-are no longer diagonal — they are linearly separable, and a single output neuron finishes the job.
+weighted sum through a squashing function — so each one carves the input plane with its own soft
+line. For XOR, two hidden units are enough: one can learn "am I in the OR region?", the other "am
+I in the AND region?". Now hand the *output* neuron not the raw inputs but those two answers. In
+the new 2D space whose coordinates are the hidden units' outputs, the four XOR points are no
+longer diagonal — they are linearly separable, and a single output neuron finishes the job.
 
 The hidden layer, in other words, **learns a new set of features** — a coordinate system in which
-the problem becomes easy. Nobody hand-designs those features; the network discovers them, because
-backprop tells each hidden weight how it should change to reduce the final error. That is the
-sentence Rumelhart, Hinton, and Williams put at the centre of their paper, and it is why "deep
-learning" is really *representation* learning.
+the problem becomes easy. Nobody hand-designs those features; the network discovers them, exactly
+as the family-tree network discovered nationality and generation, because backprop tells each
+hidden weight how it should change to reduce the final error. That is why "deep learning" is
+really *representation* learning. Later in this chapter we will watch it happen live — the
+widget below replots every data point in the hidden layer's learned coordinates, and you can see
+the four XOR corners physically untangle. But first we owe ourselves the machinery: what,
+precisely, tells a hidden weight which way to move?
+
+## The new rules of the game
+
+Rosenblatt's rule needed no calculus. It looked at one unit's error — $-1$, $0$, or $+1$ — and
+shoved the weights accordingly. That works precisely because the unit being corrected has a
+target to be wrong about. A hidden unit has none, so the mistake-driven style dies at the first
+hidden layer. The 1986 solution replaces it with a scheme that needs no per-unit targets at all,
+built from three commitments.
+
+### Why the step function had to go
+
+The plan is to ask, for every weight in the network, "if I nudged this weight a hair, would the
+final error go up or down?" — and that question is a *derivative*. Module 00's step function is
+the enemy of that question. Its graph is two flat shelves: the derivative is $0$ everywhere (and
+undefined at the jump). Nudge a weight a hair and the unit's output changes *not at all* — until
+suddenly it snaps. Flat shelves mean zero signal: no blame can flow backward through a step.
+
+So we swap the step for its smooth cousin, the **sigmoid**:
+
+$$
+\sigma(z) = \frac{1}{1 + e^{-z}}.
+$$
+
+It has the same character — near $0$ for very negative $z$, near $1$ for very positive $z$, its
+decisive swing around the threshold — but every point of it has a usable slope. And it buys a
+bonus: since the output now lives *between* $0$ and $1$, we can read it as a **probability**.
+Module 00's unit shouted "fire" or "silent"; this one murmurs "$0.93$ sure". Keep that
+interpretation in hand — it is about to choose our loss function for us.
+
+### One number to make small
+
+The second commitment: measure the whole network's wrongness with a single scalar, the **loss**
+$L$, averaged over training examples. Imagine $L$ as a landscape over the space of all weights —
+every possible setting of every $W$ and $b$ is a point, and the altitude there is how badly the
+network does. Learning is descending this landscape.
+
+Calculus hands us the compass. The **gradient** $\partial L / \partial \theta$, taken for every
+parameter $\theta$, points in the direction of steepest *ascent* — so we step against it:
+
+$$
+\theta \;\leftarrow\; \theta - \eta\, \frac{\partial L}{\partial \theta},
+$$
+
+with the **learning rate** $\eta$ setting the stride. That is **gradient descent**. Notice what
+changed philosophically since Module 00: the perceptron rule corrected one unit's mistake on one
+point; gradient descent optimizes a *global* objective, and every weight — hidden or not — gets
+its marching orders from the same scalar. A hidden unit needs no target of its own anymore. It
+only needs its share of $\partial L$, and computing those shares efficiently is the whole of
+backpropagation. This loss-landscape-plus-gradient framework, not any particular architecture, is
+the constant of this book: every chapter from here to the Transformer changes the *shape* of the
+function being descended, never the descent.
+
+### Why cross-entropy, and not squared error
+
+Which loss? The obvious first guess is squared error, $L = \tfrac12(a_2 - y)^2$ — it worked for
+centuries of curve fitting. But watch what it does through a sigmoid output. By the chain rule
+(we will earn this formula properly in a moment):
+
+$$
+\frac{\partial L}{\partial z_2} = (a_2 - y)\,\sigma'(z_2).
+$$
+
+The factor $\sigma'(z_2)$ is the sigmoid's slope, and the sigmoid is *flat* at both ends. Suppose
+the network is confidently wrong: $y = 1$ but $a_2 \approx 0$. Then $z_2$ sits far out on the
+flat left shelf, $\sigma'(z_2) \approx 0$, and the gradient — error times slope — is almost
+nothing. Squared error learns *slowest* exactly when it is *most* wrong. That is a design flaw,
+not a nuisance.
+
+The fix takes the probability reading of $a_2$ seriously. If the network outputs the probability
+of class $1$, the natural objective is to make the *probability it assigns to the correct label*
+as large as possible — equivalently, to minimize the negative log of it. Averaged over $m$
+examples, that is **binary cross-entropy**:
+
+$$
+L = -\frac{1}{m}\sum \Big[\, y \log a_2 + (1-y)\log(1-a_2) \,\Big].
+$$
+
+(Read the bracket case by case: when $y=1$ it is $\log a_2$, when $y=0$ it is $\log(1-a_2)$ —
+always the log-probability of what actually happened.) Cross-entropy's punishment grows without
+bound as the model gets confidently wrong — and, as we are about to derive, its gradient
+*cancels* the sigmoid's flat shelves exactly. The two were made for each other.
 
 ## The math (all of it)
 
-One hidden layer of $h$ sigmoid units. For an input $x \in \mathbb{R}^2$, with $\sigma(z) = 1/(1+e^{-z})$:
+Fix the architecture: one hidden layer of $h$ sigmoid units. For an input $x \in \mathbb{R}^2$:
 
-$$z_1 = W_1 x + b_1, \qquad a_1 = \sigma(z_1) \quad (\text{the } h \text{ hidden activations})$$
-$$z_2 = W_2 a_1 + b_2, \qquad \hat{y} = a_2 = \sigma(z_2) \quad (\text{the output})$$
+$$
+z_1 = W_1 x + b_1, \qquad a_1 = \sigma(z_1) \quad (\text{the } h \text{ hidden activations})
+$$
 
-We measure error with **binary cross-entropy**, the natural loss for a probability output,
-averaged over the $m$ training points:
+$$
+z_2 = W_2 a_1 + b_2, \qquad \hat{y} = a_2 = \sigma(z_2) \quad (\text{the output}),
+$$
 
-$$L = -\frac{1}{m}\sum \Big[\, y \log a_2 + (1-y)\log(1-a_2) \,\Big].$$
+with binary cross-entropy as the loss. To run gradient descent we need
+$\partial L / \partial \theta$ for all four parameter tensors $W_1, b_1, W_2, b_2$. We will build
+the answer in four steps, deriving everything: the sigmoid's slope, the chain rule on a single
+path, the output error, and finally the full network — at any depth.
 
-### Backprop is the chain rule, output-first
+### Step 1: the sigmoid's slope
 
-To do gradient descent we need $\partial L / \partial \theta$ for every weight and bias $\theta$.
-We get them by walking backward from the loss. The one fact worth committing to memory: for
-cross-entropy through a sigmoid, the output error collapses to a plain difference. Write
-$\delta_2 = \partial L / \partial z_2$; then
+Differentiate $\sigma(z) = (1 + e^{-z})^{-1}$ with the quotient rule:
 
-$$\delta_2 = a_2 - y.$$
+$$
+\sigma'(z) = \frac{e^{-z}}{(1+e^{-z})^2}
+= \underbrace{\frac{1}{1+e^{-z}}}_{\sigma(z)} \cdot \underbrace{\frac{e^{-z}}{1+e^{-z}}}_{1 - \sigma(z)}
+= \sigma(z)\,\big(1 - \sigma(z)\big).
+$$
 
-The messy $\log$ and the sigmoid derivative cancel perfectly — a small miracle that is the reason
-this pairing is standard. From $\delta_2$, every gradient is a local product. Using
-$\sigma'(z) = a(1-a)$ for the hidden layer:
+Two things to notice. Practically, the derivative is computable from the activation alone — if
+you kept $a = \sigma(z)$ from the forward pass, the slope is just $a(1-a)$, no re-exponentiation
+needed; every implementation in this book exploits that. And structurally: $a(1-a)$ peaks at
+$\tfrac14$ when $a = \tfrac12$ and decays to $0$ at both ends. The slope is *at most a quarter*.
+File that fact away — it returns at the end of this chapter with consequences.
 
-$$\frac{\partial L}{\partial W_2} = \delta_2\, a_1^\top, \qquad \frac{\partial L}{\partial b_2} = \delta_2,$$
-$$\delta_1 = \big(W_2^\top \delta_2\big) \odot a_1(1 - a_1), \qquad \frac{\partial L}{\partial W_1} = \delta_1\, x^\top, \qquad \frac{\partial L}{\partial b_1} = \delta_1.$$
+### Step 2: the chain rule, on one path
+
+Strip the network to its skeleton: one input, one hidden unit, one output — a chain
+$x \to z_1 \to a_1 \to z_2 \to a_2 \to L$, where $z_1 = w_1 x + b_1$ and $z_2 = w_2 a_1 + b_2$.
+How does the loss respond to a wiggle in the *first* weight, $w_1$? The wiggle propagates:
+nudging $w_1$ moves $z_1$, which moves $a_1$ through the sigmoid, which moves $z_2$ through
+$w_2$, which moves $a_2$ through the other sigmoid, which moves $L$. The chain rule says the
+total sensitivity is the product of the local ones:
+
+$$
+\frac{\partial L}{\partial w_1}
+= \frac{\partial L}{\partial a_2}
+\cdot \underbrace{\sigma'(z_2)}_{a_2 \to z_2}
+\cdot \underbrace{w_2}_{z_2 \to a_1}
+\cdot \underbrace{\sigma'(z_1)}_{a_1 \to z_1}
+\cdot \underbrace{x}_{z_1 \to w_1}.
+$$
+
+Every factor is *local* — each arrow of the chain contributes its own slope, and nothing else.
+That locality is the entire secret. In a real network many weights share the front of this
+product (everything from $L$ down to their own layer), so we compute it once, from the output
+backward, and hand it down. The bookkeeping gets a name: write
+
+$$
+\delta_\ell \;=\; \frac{\partial L}{\partial z_\ell}
+$$
+
+for the loss's sensitivity to layer $\ell$'s pre-activation — the "**error at layer $\ell$**".
+Backpropagation is nothing but computing $\delta$ at the output and passing it backward, one
+local factor at a time.
+
+### Step 3: the small miracle at the output
+
+Start the backward walk at the loss. For one example, $L = -[\,y \log a_2 + (1-y)\log(1-a_2)\,]$,
+so, differentiating each term,
+
+$$
+\frac{\partial L}{\partial a_2} = -\frac{y}{a_2} + \frac{1-y}{1-a_2}
+= \frac{-y(1-a_2) + (1-y)\,a_2}{a_2(1-a_2)}
+= \frac{a_2 - y}{a_2(1-a_2)}.
+$$
+
+An ugly fraction — until we take the next step of the chain, through the output sigmoid, whose
+slope we derived in Step 1 to be exactly $a_2(1-a_2)$:
+
+$$
+\delta_2 = \frac{\partial L}{\partial z_2}
+= \frac{\partial L}{\partial a_2}\cdot\sigma'(z_2)
+= \frac{a_2 - y}{a_2(1-a_2)} \cdot a_2(1-a_2)
+= a_2 - y.
+$$
+
+The denominator and the sigmoid slope annihilate each other. What survives is the cleanest
+possible error signal: *prediction minus target*. No flat shelves, no vanishing factor — a
+confidently-wrong output ($y=1$, $a_2 \approx 0$) gets a gradient of nearly $-1$, full strength.
+This is not luck; cross-entropy is precisely the loss whose steepness grows in step with the
+sigmoid's flatness, so their product stays honest. The pairing is standard everywhere for exactly
+this reason, and $\delta_2 = a_2 - y$ is the one line of this chapter most worth memorizing.
+
+### Step 4: the full backward pass
+
+Now the real network, where $W_1$ is $h \times 2$ and the hidden layer is a vector. Nothing new
+happens — we apply the same local factors, just for all units at once. From $\delta_2$, the
+output layer's own gradients are immediate, because $z_2 = W_2 a_1 + b_2$ is linear in its
+parameters (the local slope of $z_2$ with respect to $W_2$ is just $a_1$, and with respect to
+$b_2$ is $1$):
+
+$$
+\frac{\partial L}{\partial W_2} = \delta_2\, a_1^\top, \qquad \frac{\partial L}{\partial b_2} = \delta_2.
+$$
+
+To keep walking backward we need the error at the hidden layer. Two local steps: from $z_2$ back
+to $a_1$ (the local factor is the weight matrix — each hidden unit $j$ influenced $z_2$ in
+proportion to $W_{2,j}$), then from $a_1$ back to $z_1$ (the local factor is the hidden sigmoid's
+slope, elementwise):
+
+$$
+\delta_1 = \big(W_2^\top \delta_2\big) \odot a_1(1 - a_1),
+$$
+
+and then the hidden layer's parameter gradients mirror the output layer's:
+
+$$
+\frac{\partial L}{\partial W_1} = \delta_1\, x^\top, \qquad \frac{\partial L}{\partial b_1} = \delta_1.
+$$
 
 Read it as a flow: the error $\delta_2$ at the output is **pushed back** through $W_2$ to become
-an error $\delta_1$ at the hidden layer (the $W_2^\top \delta_2$ term), then squeezed through the
-hidden sigmoid's slope (the $a_1(1-a_1)$ term). Each layer hands the one before it a share of the
-blame. Then we descend: $\theta \leftarrow \theta - \eta\, \partial L / \partial \theta$.
+an error $\delta_1$ at the hidden layer, then squeezed through the hidden sigmoid's slope. Each
+layer hands the one before it a share of the blame, weighted by how much it listened. Then every
+parameter descends: $\theta \leftarrow \theta - \eta\, \partial L / \partial \theta$.
 
-That is the entire algorithm. The rest of this page is that written out in code — and then checked.
+### Backprop at any depth
+
+The claim in this chapter's opening — that the largest language models train by *exactly this* —
+deserves its equations. For a network of $L$ layers, with $a^{(0)} = x$ and
+$z^{(\ell)} = W^{(\ell)} a^{(\ell-1)} + b^{(\ell)}$, the backward pass is a four-line recursion:
+
+$$
+\delta^{(L)} = a^{(L)} - y \qquad \text{(cross-entropy output, as in Step 3)}
+$$
+
+$$
+\delta^{(\ell)} = \big(W^{(\ell+1)\top}\, \delta^{(\ell+1)}\big) \odot \sigma'\!\big(z^{(\ell)}\big)
+\qquad \ell = L-1, \dots, 1
+$$
+
+$$
+\frac{\partial L}{\partial W^{(\ell)}} = \delta^{(\ell)}\, a^{(\ell-1)\top}, \qquad
+\frac{\partial L}{\partial b^{(\ell)}} = \delta^{(\ell)}.
+$$
+
+One forward sweep stores every activation; one backward sweep computes every gradient. The
+backward sweep costs the same order of work as the forward one — that efficiency, Linnainmaa's
+1970 observation, is what makes training million- and billion-parameter models thinkable at all.
+Deeper chapters will change what a "layer" is — convolutions in Module 03, recurrence in
+Module 06, attention in Module 13 — and every one of those layers simply supplies its own local
+factors to this same recursion. Learn these four lines once and you have learned how every
+network in this book trains.
+
+> **Aside: how much can one hidden layer do?** In 1989 George Cybenko proved that a network with
+> a *single* hidden layer of sigmoid units can approximate any continuous function on a bounded
+> region to any desired accuracy, given enough hidden units — the **universal approximation
+> theorem**. So why isn't this book one chapter long? Because the theorem promises *existence*,
+> not *learnability*: it says a good network is out there, not that gradient descent will find
+> it, and not that "enough units" is a number you can afford. The rest of deep learning — depth,
+> architecture, initialization, optimization — is the study of making good networks *findable*.
+> Existence was never the hard part.
+
+## The geometry: what the hidden layer learns
+
+Module 00 taught us to see one neuron geometrically: its weight vector is the normal of a line,
+and its output says which side of the line you are on — softly, now that the step is a sigmoid.
+A hidden layer of $h$ units is therefore $h$ *soft lines* laid across the input plane, and the
+hidden activation vector $a_1$ is a point's **coordinates relative to those lines**: unit $j$'s
+activation answers "how far past line $j$ is this point?", squashed to $(0,1)$. The map
+$x \mapsto a_1$ is a learned change of coordinates, and the output unit is an ordinary
+Module-00 perceptron living in that new space.
+
+That is the picture to hold while playing with the widget below. The left panel is the familiar
+input plane. The right panel is the *hidden space*: every data point replotted at the coordinates
+the hidden layer assigns it, with the output unit's straight cut shown when it can be drawn
+exactly. Press **Play** on two moons and watch both panels at once — as the input-space boundary
+bends, the hidden-space points drift apart until a straight line separates what no straight line
+could separate on the left. Then switch to **XOR**, set **hidden** to **2**, and press Play. The
+four corners — provably inseparable where they started — physically untangle: the two hidden
+units learn their two soft lines (one hunting the OR region, one the AND region, just as the
+intuition section promised), and in the coordinates of *their answers*, the diagonal knot comes
+undone. Finally drag **hidden** down to **1**: the hidden space collapses to a line, the network
+loses its power to bend, and XOR becomes impossible again. That knob *is* Minsky and Papert's
+theorem, and the escape from it, in one slider.
+
+<MlpWidget />
+
+With enough hidden units the moons are cleanly separated within a few hundred steps; with one,
+the boundary can only be straight and the loss plateaus. (With more than two hidden units, the
+right panel shows only two of the $h$ hidden coordinates — the honest full picture would need
+$h$ dimensions, which is also why the output's straight cut is only drawn when $h \le 2$.)
 
 ## The code: from scratch, and bit-for-bit
 
 The project's contract (pedagogy principle #3) holds here too: the **C and Python implementations
-must produce identical numbers** on the same seed. For XOR we write both with explicit loops in the
-same order, initialize the weights from the same 64-bit LCG, and they agree to a relative
-tolerance of $10^{-9}$. Here is the heart of it — the backward pass — side by side.
+must produce identical numbers** on the same seed. For XOR we write both with explicit loops in
+the same order, initialize the weights from the same 64-bit LCG we built in Module 00, and they
+agree to a relative tolerance of $10^{-9}$. The code walks the same order as the math: initialize,
+forward, backward.
+
+### Starting weights: why zero no longer works
+
+Module 00's perceptron could start from $w = 0$ and learn fine. An MLP **cannot**, and the reason
+is a lovely symmetry trap. Suppose every weight starts at zero (or at any shared constant). Then
+all $h$ hidden units compute the same $z_1$, hence the same activation; the backward pass hands
+them all the same $\delta_1$ component; so they all receive the *same update* and remain
+identical copies of one another — forever. Gradient descent preserves the symmetry it starts
+with. An $h$-unit hidden layer initialized to zeros is, and will always remain, a one-unit layer
+in disguise, and XOR needs at least two genuinely different units. So we must **break the
+symmetry** by starting random:
+
+```c
+/* Initialize weights by drawing from the RNG in a fixed order: W1 row-major,
+ * then b1, then W2, then b2 -- the exact order the Python mirror uses. */
+static void mlp_init(MLP *m, Rng *r, double scale) {
+    for (int j = 0; j < N_HIDDEN; j++)
+        for (int k = 0; k < N_IN; k++)
+            m->W1[j][k] = scale * rng_signed(r);
+    for (int j = 0; j < N_HIDDEN; j++)
+        m->b1[j] = scale * rng_signed(r);
+    for (int j = 0; j < N_HIDDEN; j++)
+        m->W2[j] = scale * rng_signed(r);
+    m->b2 = scale * rng_signed(r);
+}
+```
+
+Each weight is a uniform draw in $[-\text{scale}, \text{scale}]$, and the Python mirror consumes
+the identical RNG stream in the identical order, so both languages start from the same network.
+How *large* the random values should be is a surprisingly deep question — too big saturates the
+sigmoids, too small starves them — but it is Module 02's question; here a scale of $1.0$ serves.
+
+### Forward: run the network
+
+The forward pass is the two layer equations, written as loops. In C:
+
+```c
+/* Forward pass: input -> hidden (sigmoid) -> output (sigmoid). Fills a1[] with
+ * the hidden activations and returns a2 = yhat. */
+static double forward(const MLP *m, double x0, double x1, double a1[N_HIDDEN]) {
+    for (int j = 0; j < N_HIDDEN; j++) {
+        double z1 = m->b1[j] + m->W1[j][0] * x0 + m->W1[j][1] * x1;
+        a1[j] = sigmoid(z1);                 /* a1_j = sigmoid(z1_j) */
+    }
+    double z2 = m->b2;
+    for (int j = 0; j < N_HIDDEN; j++)
+        z2 += m->W2[j] * a1[j];              /* z2 = W2 . a1 + b2 */
+    return sigmoid(z2);                      /* yhat = sigmoid(z2) */
+}
+```
+
+Note that it *returns the hidden activations*, not just the answer — the backward pass needs
+$a_1$ both for $\partial L/\partial W_2$ and for the slope factor $a_1(1-a_1)$, so the forward
+pass saves its work. (Every framework you will ever use does the same; the saved activations are
+why training takes more memory than inference.) The Python mirror reads line for line the same.
+
+### Backward: the chain rule, verbatim
+
+Here is the heart of the module — the backward pass, side by side. Compare each line to Step 4's
+equations; the correspondence is one-to-one.
 
 ```python
 # python/mlp.py — accumulate the gradient of the mean loss over all samples
@@ -111,12 +441,12 @@ def backward(self, X, y):
     for i in range(n):
         x0, x1, yi = float(X[i][0]), float(X[i][1]), float(y[i])
         a1, a2 = self.forward(x0, x1)
-        dz2 = a2 - yi                          # BCE through sigmoid
+        dz2 = a2 - yi                          # step 3: delta2 = a2 - y
         for j in range(self.n_hidden): dW2[j] += dz2 * a1[j]
         db2[0] += dz2
         for j in range(self.n_hidden):
-            da1 = dz2 * float(self.W2[j])
-            dz1 = da1 * a1[j] * (1.0 - a1[j])  # sigmoid'
+            da1 = dz2 * float(self.W2[j])      # push back through W2
+            dz1 = da1 * a1[j] * (1.0 - a1[j])  # through sigmoid' = a(1-a)
             dW1[j, 0] += dz1 * x0; dW1[j, 1] += dz1 * x1
             db1[j] += dz1
     dW1 /= n; db1 /= n; dW2 /= n; db2 /= n
@@ -137,38 +467,71 @@ for (int j = 0; j < N_HIDDEN; j++) {
 }
 ```
 
-### The gradient check: how we *know* it is right
+### From loops to matrices
+
+The loops are the honest teaching form, but they hide a fact the math already told us: each of
+those inner loops *is* a matrix operation. `python/mlp.py` also carries a vectorized twin,
+`MLPVec`, that processes a whole **batch** of examples at once — inputs stacked as rows of a
+matrix $X$ — by turning every loop into a matrix product:
+
+```python
+def backward(self, X, y):
+    n = X.shape[0]
+    P = self.forward(X)
+    Y = np.zeros_like(P)
+    Y[np.arange(n), y] = 1.0
+    dZ2 = (P - Y) / n                      # delta2, for all n samples at once
+    dW2 = self.A1.T @ dZ2                  # delta2 a1^T, summed over the batch
+    db2 = dZ2.sum(axis=0)
+    dA1 = dZ2 @ self.W2.T                  # push back through W2
+    dZ1 = dA1 * self.A1 * (1.0 - self.A1)  # through sigmoid'
+    dW1 = X.T @ dZ1
+    db1 = dZ1.sum(axis=0)
+    return dW1, db1, dW2, db2
+```
+
+Same five equations, no loops in sight: `@` sums over what the loops iterated. This matters for
+two reasons. Pedagogically, it proves the matrix equations of Step 4 *are* the loop code — if you
+ever lose your footing in a framework's tensor expressions, expand one back into its loops.
+Practically, matrix multiplication is what CPUs and GPUs are built to do fast, so the batched
+form is how every serious system computes — and it is what we will need to face 60,000 images in
+a moment.
+
+## The gradient check: how we *know* it is right
 
 Hand-derived gradients are exactly where bugs hide — a dropped $\sigma'$ factor, a wrong sign, a
-transposed index. From this module on, every backward pass earns a **finite-difference gradient
-check**. Nudge one weight by $\pm h$, watch the loss, and estimate the slope numerically:
+transposed index — and a subtly wrong gradient still *sort of* learns, which makes it the worst
+kind of bug: invisible. So from this module on, every backward pass in this book earns a
+**finite-difference gradient check**. The idea is the definition of the derivative, used as a
+witness. Nudge one parameter by $\pm h$, run the *forward* pass twice, and estimate the slope
+numerically:
 
-$$\frac{\partial L}{\partial \theta} \approx \frac{L(\theta + h) - L(\theta - h)}{2h}.$$
+$$
+\frac{\partial L}{\partial \theta} \approx \frac{L(\theta + h) - L(\theta - h)}{2h}.
+$$
 
-If the analytic gradient matches this numerical one to a relative error near $10^{-7}$, the
-derivation is correct — no reasoning required, just arithmetic. Our agreement test runs it on all
-four parameter tensors, and it passes ($\text{rel\_error} \in [4\times 10^{-10},\, 10^{-7}]$).
-The notebook goes one further and checks the same gradients against **PyTorch's** autograd, which
-agrees to $\sim 10^{-15}$ — machine precision. The hand-written chain rule and the industrial
-autodiff engine compute the same thing, because there is only one right answer.
+The estimate needs no calculus, no chain rule — only the ability to compute the loss. If the
+analytic gradient from our backward pass matches it to a relative error near $10^{-7}$ (the
+noise floor of the estimate itself in double precision), the derivation is correct: no reasoning
+required, just arithmetic. Our agreement test runs the check on all four parameter tensors:
 
-## Play with it
+```
+dW1  rel_error = 1.03e-07  ok
+db1  rel_error = 2.95e-09  ok
+dW2  rel_error = 5.62e-10  ok
+db2  rel_error = 4.23e-10  ok
+```
 
-Press **Play** to run gradient descent on two interleaving moons. The shaded regions are the
-network's prediction; watch the boundary *bend* into a curve that threads between the classes —
-something no straight line could do. Then switch to **XOR** to solve Module 00's wall. The most
-instructive knob is **hidden**: drag it down to **1** and the network loses its power to bend — a
-single hidden unit is, once again, just one line.
-
-<MlpWidget />
-
-With enough hidden units the moons are cleanly separated within a few hundred steps; with one, the
-boundary can only be straight and the loss plateaus. That knob *is* the lesson of this module.
+The notebook goes one further and loads our exact weights into **PyTorch**, whose autograd
+engine re-derives the gradients by its own means: agreement to $\sim 10^{-15}$ — machine
+precision. The hand-written chain rule and the industrial autodiff engine compute the same thing,
+because there is only one right answer.
 
 ## Watch it learn
 
-The same idea, animated: first the error flowing **backward** through the network, then the real
-MLP from `python/mlp.py` training on two moons — its learned regions bending into place epoch by
+The same mechanism, animated as a narrated sequence: first the error appearing at the output and
+flowing **backward** through every weight — the $\delta$'s of Step 4 made visible — then the real
+MLP from `python/mlp.py` training on two moons, its learned regions bending into place epoch by
 epoch until the two moons are split.
 
 <figure>
@@ -185,43 +548,194 @@ epoch until the two moons are split.
 
 ## Toy to real: 97% on MNIST
 
-XOR proves the mechanism; MNIST proves it *scales*. The same network — now `784 → 128 → 10` with a
-**softmax** output over the ten digits — trains on 60,000 handwritten images with plain
-mini-batch SGD and **no tricks** (initialization, momentum, and regularization are Module 02). It
-crosses 95% within two epochs and settles near **97.7%**. The softmax's cross-entropy gradient has
-the *same* clean form we derived for XOR, $\delta_2 = a_2 - y$ (now a vector minus a one-hot), so
-the backward pass is the batched twin of the code above. The
-[notebook](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/01-mlp-backprop/notebook.ipynb)
-trains it end to end and cross-checks the result against TensorFlow and Keras.
+XOR proves the mechanism on four points. The book's rule (pedagogy principle #4) is that no
+mechanism gets to stop there: it must face a real dataset, where success is a measurement rather
+than a demonstration. Ours is **MNIST**.
+
+### Meet the dataset
+
+MNIST is 70,000 handwritten digits — 60,000 for training, 10,000 held out for testing — each a
+$28 \times 28$ grayscale image, which we flatten to a vector of $784$ pixel intensities. It was
+assembled in the 1990s by Yann LeCun, Corinna Cortes, and Christopher Burges from two batches of
+U.S. digit forms collected by NIST — one written by Census Bureau employees, one by high-school
+students — remixed so the training and test sets share a distribution ("Modified NIST"). This
+was no toy to its makers: LeCun's group was building the networks that would read real ZIP
+codes on envelopes and real amounts on checks, and MNIST became *the* benchmark of 1990s
+neural network research — it has been called the drosophila of machine learning, small enough
+to run in minutes, real enough that results on it mean something. It will be our companion for
+several chapters, so the numbers we set here matter — they are the baseline every later
+architecture must beat.
+
+### From one probability to ten: softmax
+
+XOR needed one probability; MNIST needs a verdict across **ten classes**. The output layer grows
+to ten units, and we need their ten pre-activations turned into ten probabilities that sum to
+one. The standard tool is **softmax** — exponentiate each score to make it positive, then
+normalize:
+
+$$
+p_k = \frac{e^{z_k}}{\sum_{j} e^{z_j}}, \qquad k = 0, \dots, 9.
+$$
+
+The loss is cross-entropy again, now in its multi-class form: minimize the negative log of the
+probability given to the correct class, $L = -\log p_y$. And here the chapter's central
+cancellation performs an encore. Since $\log p_y = z_y - \log \sum_j e^{z_j}$, differentiating
+with respect to score $z_k$ gives $\partial \log p_y / \partial z_k = y_k - p_k$, where $y$ is
+the one-hot vector for the true class ($y_k = 1$ if $k$ is the right digit, else $0$). So
+
+$$
+\delta_2 = \frac{\partial L}{\partial z_2} = p - y
+$$
+
+— *prediction minus target*, again. The messy exponentials and the log flatten each other, just
+as sigmoid and BCE did in Step 3, and for the same underlying reason. Every line of our backward
+pass survives the move to ten classes untouched; only the output width changed.
+
+### Mini-batches, and the run
+
+One last idea and we can train. On XOR we descended the gradient of the loss over all four
+points — *full-batch* descent. On 60,000 images, computing the exact gradient for every single
+step is wasteful: an estimate from a small random sample of examples points in nearly the same
+direction and costs a thousandth as much. So each epoch we shuffle the training set, split it
+into **mini-batches** of 64, and take one gradient step per batch — 938 slightly-noisy steps per
+epoch instead of one exact one. This is **stochastic gradient descent** (SGD), the workhorse of
+everything to come, and the batched matrix code above is exactly what makes it cheap.
+
+The network is the same shape as XOR's, scaled: $784 \to 128 \to 10$, sigmoid hidden layer,
+softmax output, initialized with a modest $1/\sqrt{\text{fan-in}}$ scaling to keep the sigmoids
+responsive (Module 02 will justify that choice). No momentum, no regularization, no schedule —
+plain SGD, because this chapter's claim is that the *mechanism alone* suffices. Here is the run:
+
+<figure>
+  <img
+    src={`${import.meta.env.BASE_URL}media/01-mnist-curve.png`}
+    alt="Training and test accuracy versus epoch for the 784-128-10 MLP on MNIST. Both curves start above 92% after the first epoch, cross the dashed 95% target line by epoch 3, and flatten out — train near 99%, test near 98% — with a small gap opening between them."
+    width="720"
+    style="max-width:100%;height:auto;border-radius:8px"
+  />
+  <figcaption style="font-size:0.85rem;color:var(--color-muted);margin-top:0.5rem">
+    Accuracy per epoch, from the actual run of <code>python/mlp.py</code>'s model (seed 0). The
+    dashed line is the module's 95% target; the gap that opens between the train and test curves
+    is the first sighting of a theme Module 02 will name.
+  </figcaption>
+</figure>
+
+The shape of that curve is worth reading slowly. An untrained network guesses at chance — one
+digit in ten — and a single pass over the data already lifts it to nearly 93%. The 95% target
+falls by epoch 3, and the last dozen epochs buy fractions of a point as the network polishes its
+boundaries: learning is violently front-loaded. Notice also the two curves separating: training
+accuracy keeps creeping toward perfection while test accuracy levels off near **97.7%**. That
+widening sliver — being better on the data you studied than on data you haven't seen — is
+**overfitting** in embryo, harmless here but central later. The run settles at 97.0% after eight
+epochs and 97.7% by fifteen; the self-verifying notebook reproduces the eight-epoch figure
+end-to-end and cross-checks it against TensorFlow and Keras.
+
+And what of the 2.3% it gets wrong?
+
+<figure>
+  <img
+    src={`${import.meta.env.BASE_URL}media/01-mnist-misclassified.png`}
+    alt="A grid of ten handwritten digits the trained network misclassified, each labeled with what the network read and what the digit actually was. Several are ambiguous even to a human — a 4 that looks like a 9, a cramped 8 read as a 2."
+    width="720"
+    style="max-width:100%;height:auto;border-radius:8px"
+  />
+  <figcaption style="font-size:0.85rem;color:var(--color-muted);margin-top:0.5rem">
+    The first ten test digits the network gets wrong, with its reading and the truth. Some are
+    genuinely sloppy handwriting; others fail because a flattened network has no idea that two
+    inky pixels were neighbors on the page.
+  </figcaption>
+</figure>
+
+Look closely and the mistakes split in two. Some digits are simply terrible handwriting — a human
+would hesitate too, and the residual disagreement between careful humans on MNIST is around
+0.2%. But others look easy, and those failures share a cause we built in on purpose: we fed the
+network a *flat vector* of 784 numbers, throwing away the fact that the image was
+two-dimensional. Our MLP does not know that pixel 29 sits directly below pixel 1; a stroke
+shifted two pixels left is, to it, an entirely different input. For calibration: a straight-line
+model — softmax regression, no hidden layer at all — manages only about 88–92% on MNIST, so the
+hidden layer's learned features bought us a five-fold cut in errors. Closing most of the
+remaining gap requires teaching the network about *space itself* — that is convolution, and it is
+Module 03's story.
+
+## What 1986 didn't solve
+
+Module 00 ended with a winter; honesty requires admitting this chapter does not end with an
+endless summer. Backpropagation removed the *in-principle* barrier — any shape of network,
+trainable — and yet by the mid-1990s neural networks had slipped out of fashion again, losing
+benchmark after benchmark to newer methods. If backprop works, why did the field stall a second
+time? Because in practice, four problems were waiting, and we have already met the seeds of each.
+
+The worst hides in Step 1's innocent fact that $\sigma' \le \tfrac14$. Look again at the
+general recursion: each layer's $\delta$ is the next layer's $\delta$ *multiplied by* a weight
+term and by $\sigma'(z)$. Stack many layers and the error signal is multiplied by a
+quarter-or-less at every hop — by layer ten, the front of the network receives an exponentially
+faint whisper of the blame. This is the **vanishing gradient problem** (named and analyzed by
+Sepp Hochreiter in 1991), and it meant that "deep" networks — the whole promise of the idea —
+mostly refused to train. Saturation makes it worse: a unit pushed onto its flat shelf has
+$\sigma' \approx 0$ and goes silent for good. Second, our results were quietly fragile: a
+hand-tuned learning rate, a hand-picked initialization scale — nudge either and XOR fails to
+converge; nobody yet knew principled choices. Third, gradient descent on a non-convex landscape
+carries no promise: Module 00's convergence *theorem* is gone, replaced by "follow the slope and
+hope", and the era's theorists feared the hills were full of traps. And fourth, the compute and
+data that would eventually dissolve most of these worries — GPUs, web-scale datasets — were
+decades away. Kernel machines, with convex losses and real guarantees, deservedly won the 1990s.
+
+| Year | Event |
+|------|-------|
+| 1986 | Backprop popularized — any architecture trainable *in principle* |
+| 1989 | Universal approximation proved; LeCun's group starts reading real ZIP codes |
+| 1991 | Hochreiter names the vanishing gradient — depth doesn't train |
+| mid-1990s | SVMs and friends win the benchmarks; the second neural lull |
+| 2006–2012 | Better init, better activations, GPUs, and data end the lull (Modules 02–04) |
+
+Every one of those four problems has since been solved or tamed, and the solutions are precisely
+the next chapters: initialization and activations that keep gradients alive, optimizers that tune
+their own step sizes, regularization that manages the train–test gap we just witnessed
+(Module 02); architectures that respect the structure of images (Module 03); and, much later,
+skip connections that let gradients bypass the multiplication chain entirely (Module 05). The
+machine works. Making it work *fast, deep, and reliably* is the story from here.
 
 ## Exercises & what's next
 
-Before moving on, make the ideas yours:
+Before moving on, make the ideas yours — the early ones need only the widget, the later ones a
+pencil:
 
-1. **Kill the hidden layer.** In the widget, set `hidden = 1` on two moons and press Play. Why does
-   the boundary stay straight? Relate it back to the XOR proof from Module 00 — one hidden unit is
-   one line.
-2. **Feel the learning rate.** Drag `lr` to its extremes. A tiny rate crawls; a large one can
-   overshoot and make the loss jump. There is a sweet spot — Module 02 is largely about finding it
-   automatically.
-3. **Break the gradient check.** In `python/mlp.py`, delete the `a1[j] * (1.0 - a1[j])` factor
-   (the sigmoid derivative) and run the agreement test. Watch `rel_error` explode from $10^{-7}$ to
-   order 1 — that is the check earning its keep.
-4. **Count the lines.** XOR needs a hidden layer, but how *few* units? Edit the assignment's
-   `N_HIDDEN` down to 2, then 1. Where does it stop reaching 100%, and why?
+1. **Kill the hidden layer.** In the widget, set `hidden = 1` on two moons and press Play. Why
+   does the boundary stay straight? Relate it back to the XOR proof from Module 00 — one hidden
+   unit is one line, and watch the right panel collapse to confirm it.
+2. **Watch the untangling.** Switch to XOR with `hidden = 2` and step slowly. In the right panel,
+   the four corners start tangled and end linearly separable. From the left panel, sketch the two
+   soft lines the hidden units learned — do they match the OR-region/AND-region circuit from the
+   start of this chapter, or did the network invent a different decomposition that also works?
+3. **Feel the learning rate.** Drag `lr` to its extremes. A tiny rate crawls; a large one can
+   overshoot and make the loss jump. There is a sweet spot — Module 02 is largely about finding
+   it automatically.
+4. **Break the gradient check.** In `python/mlp.py`, delete the `a1[j] * (1.0 - a1[j])` factor
+   (the sigmoid derivative) and run the agreement test. Watch `rel_error` explode from $10^{-7}$
+   to order 1 — that is the check earning its keep.
+5. **Count the lines.** XOR needs a hidden layer, but how *few* units? Edit the assignment's
+   `N_HIDDEN` down to 2, then 1. Where does it stop reaching 100%, and why? (Cybenko says two
+   should exist — does gradient descent *find* them from every seed?)
+6. **Derive tanh's delta.** Suppose the hidden activation were $\tanh$ instead of sigmoid. Show
+   that $\tanh'(z) = 1 - a^2$ and rewrite the $\delta_1$ equation. (One reason tanh often trains
+   faster: its slope peaks at $1$, not $\tfrac14$ — a preview of Module 02.)
+7. **Earn the softmax gradient.** Fill in the derivation sketched above: starting from
+   $L = -\log p_y$ with $p = \mathrm{softmax}(z)$, show $\partial L / \partial z_k = p_k - y_k$,
+   being careful with the $k = y$ and $k \ne y$ cases.
 
 Then go deeper into the running code: the self-verifying
 [`notebook.ipynb`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/01-mlp-backprop/notebook.ipynb)
-rebuilds everything above cell by cell — XOR, the gradient check, two moons, MNIST, and the
-framework mirrors — while
+rebuilds everything above cell by cell — the derivations, the gradient check, the hidden-space
+plot, two moons, MNIST, and the framework mirrors — while
 [`assignment.ipynb`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/01-mlp-backprop/assignment.ipynb)
 hands you the load-bearing lines (forward, the backward pass, the SGD step) to implement yourself,
 graded against the canonical code and a numerical gradient check. All of it lives in
 [`topics/01-mlp-backprop/`](https://github.com/shaia/deep-learning-from-scratch/tree/main/topics/01-mlp-backprop).
 
-We can now train a network of any shape — but it took a hand-tuned learning rate, and the
-saturating sigmoids we used slow learning to a crawl on deeper stacks. Fixing exactly that is the
-next chapter.
+We can now train a network of any shape — but we hand-tuned the learning rate, hand-picked the
+initialization, and built the whole thing on an activation whose slope never exceeds a quarter.
+We have seen exactly where each of those choices will bite. Sharpening all three is the next
+chapter.
 
 ---
 
