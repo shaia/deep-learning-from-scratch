@@ -1,21 +1,36 @@
 ---
-// Module 01's interactive: train a 2 -> H -> 1 sigmoid MLP with backprop and
-// watch the decision boundary bend around two moons — or solve XOR, the wall a
-// single perceptron never could. Embed in MDX with:
+// Module 01's interactive: train a 2 -> H -> 1 sigmoid MLP with backprop, in
+// two panels. Left: the input plane, where the decision boundary bends around
+// two moons — or solves XOR, the wall a single perceptron never could. Right:
+// the same points replotted at their hidden activations — the learned
+// coordinate system in which one straight cut suffices. Embed in MDX with:
 //   import MlpWidget from '../../components/viz/MlpWidget.astro'
 import WidgetFrame from './WidgetFrame.astro';
 ---
 
 <WidgetFrame
   title="Train an MLP with backprop"
-  caption="Press Play to run gradient descent; the shaded regions are the network's prediction, bending into a curved boundary as it learns (misclassified points get a ring). Switch to XOR to solve Module 00's wall. Drag the learning rate, or the hidden width — set it to 1 and watch the network lose its power to bend."
-  alt="A 2D plane with two classes of dots and a shaded decision surface. As training runs, the boundary curves to separate two interleaving moons; with one hidden unit it can only draw a straight cut."
+  caption="Press Play to run gradient descent; the shaded regions are the network's prediction, bending into a curved boundary as it learns (misclassified points get a ring). The right panel replots every point at the coordinates the hidden layer assigns it. Switch to XOR, set hidden = 2, and watch the four corners untangle in hidden space until one straight cut separates them — then set hidden = 1 and watch the network lose its power to bend."
+  alt="Two 2D panels. Left: dots of two classes on the input plane with a shaded decision surface that curves as training runs. Right: the same dots replotted at their hidden-layer activations, where they drift until a straight boundary separates the classes."
 >
-  <canvas
-    id="mlp-canvas"
-    width="640"
-    height="420"
-    style="max-width:100%;height:auto"></canvas>
+  <div class="panels">
+    <div class="panel">
+      <div class="panel__label">input space</div>
+      <canvas
+        id="mlp-canvas"
+        width="460"
+        height="400"
+        style="max-width:100%;height:auto"></canvas>
+    </div>
+    <div class="panel">
+      <div class="panel__label">hidden space — each axis is one unit's answer</div>
+      <canvas
+        id="mlp-hidden-canvas"
+        width="460"
+        height="400"
+        style="max-width:100%;height:auto"></canvas>
+    </div>
+  </div>
 
   <div class="controls">
     <button id="mlp-play" type="button">▶ Play</button>
@@ -48,6 +63,7 @@ import WidgetFrame from './WidgetFrame.astro';
   import { mountMlp, type Stats } from './mlpCore';
 
   const canvas = document.getElementById('mlp-canvas') as HTMLCanvasElement | null;
+  const hiddenCanvas = document.getElementById('mlp-hidden-canvas') as HTMLCanvasElement | null;
   const playBtn = document.getElementById('mlp-play') as HTMLButtonElement | null;
   const stepBtn = document.getElementById('mlp-step');
   const resetBtn = document.getElementById('mlp-reset');
@@ -61,6 +77,7 @@ import WidgetFrame from './WidgetFrame.astro';
 
   if (canvas) {
     const w = mountMlp(canvas, {
+      hiddenCanvas: hiddenCanvas ?? undefined,
       onStats(s: Stats) {
         if (playBtn) playBtn.textContent = s.playing ? '⏸ Pause' : '▶ Play';
         if (stats) {
@@ -99,6 +116,25 @@ import WidgetFrame from './WidgetFrame.astro';
 </script>
 
 <style>
+  .panels {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 0.75rem;
+    width: 100%;
+    justify-items: center;
+  }
+  .panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+    min-width: 0;
+  }
+  .panel__label {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.75rem;
+    color: var(--color-muted);
+  }
   .controls {
     display: flex;
     flex-wrap: wrap;

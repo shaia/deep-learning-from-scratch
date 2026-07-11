@@ -14,7 +14,17 @@ prehistory that leads into it. One-line summaries capture *why the paper mattere
   - Minsky & Papert (1969), *Perceptrons* — proved the single-layer limits (the XOR wall).
 - **01 MLP + Backpropagation**
   - Rumelhart, Hinton & Williams (1986), *Learning Representations by Back-propagating Errors* —
-    training multi-layer nets with the chain rule.
+    training multi-layer nets with the chain rule; framed hidden units as learned representations.
+  - Linnainmaa (1970), master's thesis, Univ. of Helsinki — reverse-mode automatic
+    differentiation, backprop's engine (no neural nets).
+  - Werbos (1974), *Beyond Regression* (PhD thesis, Harvard) — backprop proposed for multilayer
+    networks a decade early, and ignored.
+  - LeCun (1985), *Une procédure d'apprentissage pour réseau à seuil asymétrique* (Cognitiva 85);
+    Parker (1985), *Learning-Logic* (MIT TR) — independent rediscoveries.
+  - Cybenko (1989), *Approximation by Superpositions of a Sigmoidal Function* — the universal
+    approximation theorem: existence, not learnability.
+  - LeCun, Bottou, Bengio & Haffner (1998), *Gradient-Based Learning Applied to Document
+    Recognition* — source of MNIST, the module's real-data benchmark (main paper for Module 03).
 - **02 Training toolkit**
   - Glorot & Bengio (2010), *Understanding the Difficulty of Training Deep Feedforward Networks*
     — Xavier initialization.

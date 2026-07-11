@@ -219,6 +219,14 @@ const siteName = 'Deep Learning From Scratch';
         text-decoration: var(--shiki-dark-text-decoration) !important;
       }
 
+      /* Display math: equations wider than the column scroll within their own
+         block instead of overflowing it (same treatment as code blocks/tables). */
+      .content .katex-display {
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 0.15rem 0; /* keep the scrollbar off the equation's descenders */
+      }
+
       /* Inline code */
       .content :not(pre) > code {
         font-size: 0.88em;

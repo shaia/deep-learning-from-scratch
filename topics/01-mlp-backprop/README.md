@@ -18,6 +18,7 @@ is a **finite-difference gradient check**.
 | `python/mlp.py` | NumPy mirror — same RNG/order as the C for XOR, plus vectorized two-moons + MNIST paths |
 | `notebook.ipynb` | Cell-by-cell walkthrough: derivation, gradient check, XOR, two moons, MNIST, framework mirrors |
 | `assignment.ipynb` | Hands-on: you implement `forward`, the **backward pass**, and the SGD step in `# TODO` blocks; a numeric gradient check grades you |
+| `figures.py` | Renders the chapter's static MNIST figures (learning curve + misclassified digits) into `site/public/media/` |
 | `tests/check_utils.py` | Self-check harness (`rel_error`, `eval_numerical_gradient*`, `compare_to_canonical`) |
 | `tests/test_agreement.py` | Compiles + runs the C, runs the Python, asserts agreement — **and** finite-diff gradient-checks backprop |
 | `anim/scene.py` | Manim scene: error flowing backward, then the two-moons boundary bending over epochs |
@@ -39,6 +40,9 @@ python topics/01-mlp-backprop/tests/test_agreement.py
 jupyter lab topics/01-mlp-backprop/notebook.ipynb
 jupyter nbconvert --to notebook --execute --inplace topics/01-mlp-backprop/notebook.ipynb
 
+# Chapter figures (MNIST learning curve + misclassified digits -> site/public/media/)
+python topics/01-mlp-backprop/figures.py
+
 # Render the animation (needs manim + ffmpeg on PATH; no LaTeX required)
 python -m manim -qm --media_dir topics/01-mlp-backprop/anim/media \
   topics/01-mlp-backprop/anim/scene.py MLPStory
@@ -49,6 +53,8 @@ The rendered video is copied to `site/public/media/01-mlp-backprop.mp4` and embe
 ## What you should see
 
 - **xor:** loss falls to ~0.0009 and accuracy reaches **1.000** — the wall from Module 00 falls.
+  (The widget's second panel — and the notebook's `h = 2` plot — show *why*: the hidden layer
+  remaps the four corners into a space where one straight cut separates them.)
 - **two-moons:** test accuracy ~**0.97** — a curved boundary threads between the moons.
 - **mnist:** test accuracy ≥ **0.95** (≈0.977 at 15 epochs) — real digits, learned from scratch.
 - The agreement test prints `OK`: C and Python match to `1e-9`, and every analytic gradient
