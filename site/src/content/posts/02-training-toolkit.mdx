@@ -41,7 +41,9 @@ An activation function does two jobs. Forward, it bends the linear map into a cu
 its **derivative multiplies every gradient that flows through it** — so wherever that slope is
 near zero, learning silently stops. That one sentence explains the shift from sigmoid to ReLU.
 
-$$\sigma'(z) = \sigma(z)\,(1-\sigma(z)) \le \tfrac14, \qquad \tanh'(z) = 1 - \tanh^2 z, \qquad \mathrm{ReLU}'(z) = \mathbb{1}[z > 0].$$
+$$
+\sigma'(z) = \sigma(z)\,(1-\sigma(z)) \le \tfrac14, \qquad \tanh'(z) = 1 - \tanh^2 z, \qquad \mathrm{ReLU}'(z) = \mathbb{1}[z > 0].
+$$
 
 Sigmoid's derivative peaks at a mere `0.25` and collapses toward `0` once `|z| ≳ 4` — its
 neurons **saturate**, and a saturated neuron is a closed gate. Stack a few layers of them and
@@ -60,7 +62,9 @@ which rides the same scale on the way back — is useless before it reaches the 
 Glorot & Bengio's fix (2010) is almost embarrassingly simple: scale the initial weights by the
 **fan-in** so the variance stays put from layer to layer.
 
-$$\textbf{Xavier (tanh/sigmoid): } \operatorname{Var}(W) = \frac{1}{n_\text{in}} \qquad\qquad \textbf{He (ReLU): } \operatorname{Var}(W) = \frac{2}{n_\text{in}}.$$
+$$
+\textbf{Xavier (tanh/sigmoid): } \operatorname{Var}(W) = \frac{1}{n_\text{in}} \qquad\qquad \textbf{He (ReLU): } \operatorname{Var}(W) = \frac{2}{n_\text{in}}.
+$$
 
 He's extra factor of `2` accounts for ReLU zeroing out half its inputs. In the notebook you
 can watch a 6-layer tanh stack's activation std stay flat under Xavier and quietly die under
@@ -71,7 +75,9 @@ the Module-01 `[-1,1)` uniform — the same plot Glorot used to make the case.
 Plain SGD, $\theta \leftarrow \theta - \eta\,g$, treats every parameter the same and remembers
 nothing. Three refinements, each a couple of lines on the last, fix its worst habits:
 
-$$\textbf{momentum: } v \leftarrow \mu v + g,\ \ \theta \mathrel{-}= \eta v \qquad \textbf{RMSProp: } s \leftarrow \beta s + (1-\beta)g^2,\ \ \theta \mathrel{-}= \frac{\eta\,g}{\sqrt{s}+\epsilon}$$
+$$
+\textbf{momentum: } v \leftarrow \mu v + g,\ \ \theta \mathrel{-}= \eta v \qquad \textbf{RMSProp: } s \leftarrow \beta s + (1-\beta)g^2,\ \ \theta \mathrel{-}= \frac{\eta\,g}{\sqrt{s}+\epsilon}
+$$
 
 Momentum accumulates a velocity, so consistent directions build speed and oscillations across
 a valley cancel. RMSProp divides each coordinate's step by a running RMS of *its own* gradient
@@ -79,7 +85,9 @@ a valley cancel. RMSProp divides each coordinate's step by a running RMS of *its
 timid. **Adam** (Kingma & Ba 2014) is simply *both at once*, plus a bias-correction so the
 running averages aren't dragged toward their zero start:
 
-$$m \leftarrow \beta_1 m + (1-\beta_1)g,\quad v \leftarrow \beta_2 v + (1-\beta_2)g^2,\quad \hat m = \frac{m}{1-\beta_1^{\,t}},\ \hat v = \frac{v}{1-\beta_2^{\,t}},\quad \theta \mathrel{-}= \frac{\eta\,\hat m}{\sqrt{\hat v}+\epsilon}.$$
+$$
+m \leftarrow \beta_1 m + (1-\beta_1)g,\quad v \leftarrow \beta_2 v + (1-\beta_2)g^2,\quad \hat m = \frac{m}{1-\beta_1^{\,t}},\ \hat v = \frac{v}{1-\beta_2^{\,t}},\quad \theta \mathrel{-}= \frac{\eta\,\hat m}{\sqrt{\hat v}+\epsilon}.
+$$
 
 It is the default optimizer of modern deep learning, and it is *nine lines of arithmetic*.
 
