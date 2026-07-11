@@ -1,4 +1,4 @@
-# Module 02 — Training Toolkit (initialization · optimizers · regularization)
+# Module 02 — Making Deep Nets Trainable (initialization · optimizers · regularization)
 
 Backprop (Module 01) *learns*; this module makes it learn **fast and reliably** — and stands up
 the shared [`nanograd`](../../lib) library that every later module builds on. Four ideas:

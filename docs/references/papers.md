@@ -25,7 +25,7 @@ prehistory that leads into it. One-line summaries capture *why the paper mattere
     approximation theorem: existence, not learnability.
   - LeCun, Bottou, Bengio & Haffner (1998), *Gradient-Based Learning Applied to Document
     Recognition* — source of MNIST, the module's real-data benchmark (main paper for Module 03).
-- **02 Training toolkit**
+- **02 Making deep nets trainable**
   - Glorot & Bengio (2010), *Understanding the Difficulty of Training Deep Feedforward Networks*
     — Xavier initialization.
   - He et al. (2015), *Delving Deep into Rectifiers* — ReLU + He initialization.
