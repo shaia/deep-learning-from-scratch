@@ -33,6 +33,7 @@ Exits 0 and prints "OK" on success; non-zero with a diff on failure. Plain
 asserts, no test framework -- runs anywhere Python + clang do.
 """
 
+import atexit
 import os
 import re
 import shutil
@@ -80,6 +81,8 @@ def compile_c() -> str:
         print("SKIP: no C compiler (clang/gcc/cc) found on PATH")
         sys.exit(0)
     out_dir = tempfile.mkdtemp(prefix="lenet_")
+    # The exe is run after this function returns, so clean up at exit.
+    atexit.register(shutil.rmtree, out_dir, ignore_errors=True)
     exe = os.path.join(out_dir, "lenet.exe" if os.name == "nt" else "lenet")
     sources = [os.path.join(C_DIR, "lenet.c")] + [
         os.path.join(LIB_C, f)
