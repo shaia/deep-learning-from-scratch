@@ -117,6 +117,11 @@ def check_agreement():
     assert "toy" in c, f"missing FINAL toy line:\n{proc.stdout}"
 
     py_fp = dict(py.run_toy())  # (name, value) pairs -> dict
+    missing = sorted(set(py_fp) - set(c["toy"]))
+    assert not missing, (
+        f"C FINAL line is missing keys {missing} (printed or parsed wrong):\n"
+        f"{proc.stdout}"
+    )
 
     failures = []
     print("== C <-> Python agreement (toy: conv 4@3x3 / ReLU / maxpool / "
