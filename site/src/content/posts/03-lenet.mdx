@@ -1,0 +1,713 @@
+---
+title: Convolutions / LeNet-5
+moduleNumber: 3
+description: The network that learned to see — locality and weight sharing turn the MLP into a machine built for images. We trace the idea from cat cortex through the Neocognitron to the check-reading LeNet-5, derive the convolution and its three gradients by hand, watch a kernel slide, meet im2col, and beat Module 01's MLP on MNIST with fewer than half its parameters — all from scratch in C and NumPy, with the 1998 original given its full due.
+draft: false
+---
+
+import ConvWidget from '../../components/viz/ConvWidget.astro';
+
+## The machine that read your checks
+
+In 1998, if you deposited a check in the United States, there was a fair chance that no human
+being ever read the amount. A machine did — and inside that machine was a neural network. AT&T's
+check-reading system, built at Bell Labs around a network called **LeNet-5** and deployed
+commercially through NCR, was processing millions of checks a day by the late 1990s; Yann LeCun's
+own estimate is that at its peak the system was reading somewhere between 10 and 20 percent of
+all the checks written in America. Handwritten digits, scrawled by millions of strangers in every
+imaginable style, classified by a learned model at industrial scale and commercial accuracy — a
+decade before "deep learning" was a phrase anyone used.
+
+It is worth pausing on why *checks*, of all things. America in the 1990s wrote tens of billions
+of them a year, and every single one had a handwritten "courtesy amount" that somebody — before
+this system, an actual person at a keyboard — had to read and key in. Template matching, the
+classical answer, dies instantly against real handwriting: there is no template for the way ten
+million strangers write a 2. The task demanded a model that *learns* what digits look like from
+examples, tolerates sloppy placement and wild style variation, and does it fast enough and
+cheaply enough to sit inside a bank's nightly pipeline. In other words: it demanded everything
+this book has built so far, plus one missing idea about images.
+
+This chapter builds that network. Not because digit-reading is still the frontier — it isn't —
+but because LeNet-5 is where the single most important architectural idea in computer vision
+enters the story: the **convolution**. Modules 01 and 02 gave us a network that can learn and a
+toolkit that makes it learn fast. But we have been feeding it images as `784` loose, unrelated
+numbers — throwing away the one thing everybody knows about pictures, which is that *nearby
+pixels belong together*. Convolution is what you get when you stop throwing that away. It is a
+small idea — embarrassingly small, once you see it — and it is the backbone of everything from
+this chapter to the vision transformers that eventually challenged it.
+
+## From cat cortex to zip codes
+
+The idea did not start in engineering. It started in a darkened lab at Johns Hopkins in 1959,
+with an anesthetized cat watching spots of light.
+
+David Hubel and Torsten Wiesel were recording from single neurons in the cat's primary visual
+cortex, trying to find what made them fire. Spots and flashes did almost nothing. The
+breakthrough came, famously, half by accident: as they slid a glass slide into their projector,
+its faint moving *edge* swept across the screen — and a neuron crackled to life. What that neuron
+wanted, it turned out, was an edge, at a particular *orientation*, in a particular *place* in the
+visual field. They mapped cell after cell and found a division of labor that should sound
+familiar by the end of this chapter. **Simple cells** fired for an oriented edge at one exact
+position. **Complex cells** fired for the same oriented edge *anywhere in a neighborhood* — the
+same question, asked with tolerance for position. And the cells were organized hierarchically,
+simple feeding complex, specific feeding tolerant. The work won the 1981 Nobel Prize, and it
+handed neural-network researchers a blueprint: early vision is *local feature detectors, repeated
+across space, followed by position-tolerant summaries*.
+
+The first person to build that blueprint into a network was Kunihiko Fukushima. His
+**Neocognitron** (1980) is the architectural ancestor of every CNN: alternating layers of
+"S-cells" (simple — local feature detectors, the same detector replicated across the image) and
+"C-cells" (complex — pooling those detections over a neighborhood), stacked into a hierarchy that
+could recognize handwritten digits with tolerance to shifts and distortion. The anatomy of the
+modern convolutional network is all there. What is missing is the learning. The Neocognitron was
+trained layer by layer with a self-organizing, competitive scheme — no labels flowing back, no
+end-to-end objective. It could not be *told* it was wrong about a digit and adjust its earliest
+feature detectors accordingly. The body had arrived before the algorithm.
+
+The algorithm, of course, is Module 01's: backpropagation. Yann LeCun — one of backprop's
+mid-1980s rediscoverers — put the two together at Bell Labs. The 1989 paper *Backpropagation
+Applied to Handwritten Zip Code Recognition* trained a small network of local, **shared-weight**
+feature maps end-to-end on 16×16 images of digits cut from real U.S. Mail zip codes, and got
+about a 5% test error rate — good enough that versions of it went on to read real mail. The
+network (retroactively "LeNet-1") established the recipe this chapter implements: convolution
+plus subsampling, stacked, finished with fully-connected layers, trained by plain gradient
+descent from pixels to labels.
+
+It also, unusually for the era, *shipped*. Bell Labs squeezed the trained network onto AT&T's
+DSP-32C signal processor, recognizing digits in real time on early-1990s silicon, and versions
+went into mail-sorting and form-reading products. A decade of that engineering — bigger training
+sets, better normalization, an architecture revised through LeNet-4 into its final form — later,
+*Gradient-Based Learning Applied to Document Recognition* (LeCun, Bottou, Bengio & Haffner,
+1998) presented the polished version, LeNet-5, and, in its second, mostly forgotten half, the
+full check-reading system built around it. The paper is a strange, wonderful document: half
+architecture description, half systems engineering, written at the exact moment its subject was
+both commercially triumphant and academically unfashionable.
+
+That 1998 paper is also why our benchmark exists at all. To compare classifiers fairly, the
+authors needed a clean, big, *honestly split* digit dataset. The government's NIST corpus had a
+notorious flaw: its designated training set (SD-3) was written by neat-handed Census Bureau
+employees and its test set (SD-1) by high-school students, so models looked far worse than they
+were. LeCun and colleagues re-shuffled the two pools into a **M**odified NIST set — 60,000
+training and 10,000 test images, size-normalized and centered into 28×28 — and MNIST has been the
+fruit-fly of machine learning ever since — small enough to train in minutes today, hard enough
+that progress on it meant something for two decades, and split honestly enough that the number
+you report is the number you deserve. On it, LeNet-5 reached 0.95% error, and 0.8% with
+distortion-augmented training — under one mistake per hundred digits, in 1998, on 1998 hardware.
+
+| Year | Milestone | What it added |
+|------|-----------|---------------|
+| 1962 | Hubel & Wiesel | simple/complex cells: local detectors + position tolerance |
+| 1980 | Fukushima, *Neocognitron* | the architecture: replicated local features, pooling, hierarchy |
+| 1989 | LeCun, zip codes | backprop meets weight sharing — trained end-to-end, deployed on mail |
+| 1998 | LeCun et al., LeNet-5 | the polished recipe, MNIST, and a system reading millions of checks |
+
+## The intuition: stop shredding the picture
+
+Here is the whole idea in one sentence: **an image is not a list of numbers, so stop feeding it
+to the network as one — detect small patterns locally, and reuse the same detector everywhere.**
+
+Think about what Module 01's MLP actually does to a digit. The `784`-pixel image is flattened
+into a row vector, and every hidden unit gets its own private weight for every pixel. Nothing in
+that architecture knows that pixel 155 sits directly above pixel 183. You could scramble all 784
+pixels with a fixed permutation — turning every digit into confetti no human could read — and the
+MLP would train to *exactly* the same accuracy, because to the MLP the image already is
+confetti. All the structure that makes a "7" a 7 — two strokes, one horizontal, one diagonal,
+meeting at a corner — is invisible to it as structure. It can memorize pixel correlations, given
+enough weights, but it starts from nothing.
+
+And "enough weights" is a lot of weights. Suppose we wanted a dense layer to do what this
+chapter's first convolutional layer does: map the 28×28 input to six 24×24 grids of feature
+detections. That is $784$ inputs to $6 \times 24 \times 24 = 3{,}456$ outputs — about **2.7
+million weights** for one layer. Our conv layer does the same job with **156**. Where did the
+other 2.7 million go? Two assumptions about images deleted them:
+
+1. **Locality.** A pattern worth detecting — an edge, a stroke ending, a corner — lives in a
+   small neighborhood. So let each output unit look at a 5×5 patch instead of the whole image:
+   25 weights and a bias, not 784. Nothing three inches from a stroke changes what the stroke is.
+2. **Weight sharing (translation).** A vertical-edge detector that is useful in the top-left
+   corner is exactly as useful at every other position, because a stroke means the same thing
+   wherever it falls. So don't learn 576 separate patch-detectors — learn **one** 5×5 detector
+   and *slide it* to all 576 positions.
+
+The slid detector is called a **kernel** (or filter), and its 576 answers, arranged back into
+their 24×24 grid, are a **feature map**: a picture of *where the pattern is*. A kernel is a
+question asked everywhere; the feature map is the sheet of answers, one per place. One question
+is not enough — a "7" needs horizontal-ness *and* diagonal-ness *and* corners — so the layer
+learns a small bank of kernels (six, in our first layer) and produces six feature maps, a
+six-channel image of pattern-evidence.
+
+Weight sharing does something subtler than saving memory, and it is worth pausing on. During
+training, the gradient for the *one* shared kernel accumulates from *every* position in *every*
+image — each patch it slid across is another lesson about what the kernel should be. The dense
+layer's 2.7 million weights each learn from one pixel-position in however many images; the shared
+25 learn from everything, everywhere. That is why convolutional nets need less data, not just
+less memory: the architecture itself encodes the fact that appearance is translation-invariant,
+so the network doesn't have to burn examples discovering it.
+
+Now stack the idea, because this is where it stops being a trick and becomes a theory of vision.
+The first layer's six feature maps are themselves a six-channel image — a picture whose "colors"
+are *amounts of pattern-evidence*. So convolve **that**. A second-layer kernel spans all six
+channels at once, which means it detects *arrangements of first-layer features*: "vertical-edge
+evidence here, next to horizontal-edge evidence there" — a corner. A corner detector was never
+programmed; it falls out of asking local questions about the answers to local questions. And
+because each second-layer cell reads a 5×5 patch of maps that each summarize patches of the
+original image, its effective window on the input — its **receptive field** — is much larger
+than 5×5 (exercise 3 has you compute exactly how much). Edges compose into corners and stroke
+junctions; in deeper networks those compose into textures, parts, and things. Hubel and Wiesel's
+hierarchy, run to the top.
+
+One more piece completes the intuition. After you know *where* the edges are to the nearest
+pixel, you usually don't care to the nearest pixel — you care that there *is* a vertical stroke
+on the right side, roughly. **Pooling** throws away the precision on purpose: summarize each 2×2
+window of a feature map by its strongest response (max pooling), halving the resolution and
+buying tolerance to small shifts. Hubel and Wiesel's division of labor, exactly: convolution
+plays the simple cells, pooling plays the complex ones. Stack the pair twice — detect edges,
+summarize; detect *arrangements of edges*, summarize — and finish with ordinary dense layers to
+read out the class. That whole stack, on MNIST, is $44{,}426$ parameters. Module 01's MLP needed
+$101{,}770$ to do a worse job.
+
+## The math: correlation, convolution, and their gradients
+
+Time to make it precise. We need a little new notation, consistent with everything so far: an
+image batch is $X$ with shape $(n, C, H, W)$ — $n$ samples, $C$ channels, height $H$, width $W$
+(so MNIST is $(n, 1, 28, 28)$). A kernel bank is $K$ with shape $(F, C, K_H, K_W)$ — $F$ filters,
+each spanning all $C$ input channels — with one bias $b_f$ per filter. We write $u, v$ for a
+position in the output map and $p, q$ for a position inside the kernel. ($K$ gets its letter
+because $W$ is taken — it means image width here, and weight matrix everywhere else.)
+
+### The operation
+
+Lay the kernel on the image with its top-left corner at $(u, v)$, multiply elementwise, add
+everything up, add the bias. That single number is one output cell; doing it at every valid
+position is the whole operation:
+
+$$
+Y[i, f, u, v] \;=\; b_f \;+\; \sum_{c=0}^{C-1}\sum_{p=0}^{K_H-1}\sum_{q=0}^{K_W-1}
+K[f, c, p, q]\; X[i, c, u+p,\, v+q].
+$$
+
+Because we require the kernel to fit entirely inside the image (**valid** placement, stride 1 —
+all LeNet needs), the output shrinks: $u$ can range over
+
+$$
+H_{\text{out}} = H - K_H + 1, \qquad W_{\text{out}} = W - K_W + 1,
+$$
+
+so a 5×5 kernel turns 28×28 into 24×24.
+
+Notice what the sum over $c$ does: a filter is not a 5×5 square but a $C \times K_H \times K_W$
+**volume**, reading every channel of its patch at once and committing to a single number. Our
+first layer's filters are $1 \times 5 \times 5$ (25 weights — grayscale in, one opinion out);
+the second layer's are $6 \times 5 \times 5$ (150 weights), which is precisely how they get to
+detect *combinations* of the first layer's features. Parameter count per layer is $F \cdot (C
+\cdot K_H \cdot K_W + 1)$ — for our first layer, $6 \times 26 = 156$; for the second, $16 \times
+(6 \cdot 25 + 1) = 2{,}416$.
+
+### One cell, by hand
+
+To keep the formula honest, run one cell of the bars toy on paper. Take a 3×3 vertical-edge
+kernel and lay it on a patch whose middle column is a bright bar:
+
+$$
+K = \begin{pmatrix} -1 & 0 & 1 \\ -1 & 0 & 1 \\ -1 & 0 & 1 \end{pmatrix},
+\qquad
+\text{patch} = \begin{pmatrix} 0 & 1 & 0 \\ 0 & 1 & 0 \\ 0 & 1 & 0 \end{pmatrix}
+\;\Rightarrow\; Y = 0.
+$$
+
+Zero! The kernel sees the bar's *body*, where left and right neighbors match, and correctly
+reports "no edge here". Slide one column left, so the kernel's $+1$ column sits on the bar:
+now $Y = 3$ — a strong positive "bright-on-my-right" edge. One more column left and $Y = 0$
+again; approach from the other side and the $-1$ column catches the bar, $Y = -3$. The feature
+map of a vertical bar is therefore a positive stripe and a negative stripe hugging the bar's two
+edges — which is exactly the signature you will see in the widget below, and exactly why the
+sign-carrying diverging colormap matters. The number is not "bar-ness"; it is *signed evidence
+of a specific local transition*.
+
+### Strides and padding, for the road ahead
+
+Two dials we set to their simplest values deserve their names now, because the next modules turn
+them. We slide the kernel one pixel at a time; sliding $S$ pixels at a time — a **stride** of
+$S$ — computes every $S$-th answer and shrinks the output by roughly that factor (AlexNet opens
+with a stride-4 layer for exactly that economy). And we required the kernel to fit inside the
+image; **padding** the border with $P_{\text{pad}}$ rings of zeros lets windows center on edge
+pixels and can keep the output the same size as the input ("same" padding). The general formula,
+worth deriving once from a number line and then trusting forever:
+
+$$
+H_{\text{out}} = \left\lfloor \frac{H + 2P_{\text{pad}} - K_H}{S} \right\rfloor + 1.
+$$
+
+With $S = 1, P_{\text{pad}} = 0$ it collapses to our $H - K_H + 1$. LeNet-5 itself made one
+padding move — feeding 28×28 digits in as 32×32 — for reasons the historical section will
+honor.
+
+One honest confession about the name. What the formula above computes — kernel slid without
+flipping — is what a mathematician calls **cross-correlation**. A true *convolution* flips the
+kernel in both axes first ($K[p,q] \to K[K_H{-}1{-}p,\, K_W{-}1{-}q]$), a convention that makes
+convolution commutative and Fourier-friendly. For learning it makes no difference whatsoever:
+the network would simply learn the flipped kernel. So, like PyTorch, TensorFlow, and every other
+modern framework, we compute cross-correlation and call the layer `conv2d` anyway. Keep the
+distinction in your pocket, though — the flip is about to sneak back in on its own.
+
+Pooling is simpler. Non-overlapping $P \times P$ max pooling (we use $P = 2$) partitions each
+feature map into little windows and keeps each window's maximum:
+
+$$
+Y[i, c, u, v] \;=\; \max_{0 \le p, q < P} \; X[i, c,\, uP{+}p,\, vP{+}q],
+$$
+
+halving both dimensions. Average pooling — LeNet-5's original choice — takes the mean instead.
+
+### The backward pass, all three gradients
+
+The forward formula is a big sum of products, and every product involves one kernel weight and
+one pixel. So the chain rule has three jobs: route each output-cell gradient $dY[i,f,u,v] =
+\partial L / \partial Y[i,f,u,v]$ back to the bias, to the kernel weights, and to the pixels.
+As always in this book, gradients are summed over the batch and the $1/m$ lives in the loss.
+
+**The bias** appears once in every output cell of its filter, with coefficient 1, so its
+gradient is just the sum of everything downstream:
+
+$$
+\frac{\partial L}{\partial b_f} = \sum_{i,u,v} dY[i, f, u, v].
+$$
+
+**The kernel.** The weight $K[f,c,p,q]$ multiplied pixel $X[i,c,u+p,v+q]$ in the output cell
+$(u,v)$ — once per output cell. Chain rule: multiply each cell's gradient by the pixel that
+weight touched there, and add up:
+
+$$
+\frac{\partial L}{\partial K[f, c, p, q]} = \sum_{i,u,v} dY[i, f, u, v]\; X[i, c, u+p,\, v+q].
+$$
+
+Look at the shape of that formula: it slides an index over the image and sums products — it *is*
+the forward operation, with the upstream gradient playing the role of the kernel. **The gradient
+of a correlation is another correlation**, between the input and the incoming gradient. The
+operation teaches itself.
+
+**The input.** Pixel $X[i,c,h,w]$ contributed to output cell $(u, v)$ through kernel tap
+$(p, q)$ exactly when $h = u + p$ and $w = v + q$. To collect its gradient, sum over all the
+output cells it fed — substitute $u = h - p$, $v = w - q$:
+
+$$
+\frac{\partial L}{\partial X[i, c, h, w]} = \sum_{f}\sum_{p,q}
+dY[i, f, h - p,\, w - q]\; K[f, c, p, q],
+$$
+
+with terms where $(h-p,\, w-q)$ falls outside the output simply absent. Stare at the indices:
+as $p$ and $q$ *increase*, the position we read from $dY$ *decreases*. That is a correlation
+with the kernel **flipped in both axes** — a true convolution, in the mathematician's sense —
+of the (zero-padded) upstream gradient with $K$. We chose not to flip in the forward pass, and
+the flip reappeared, uninvited, in the backward pass. It was never optional; it just moves.
+
+**Pooling** has no parameters, so it only routes. Max pooling's forward remembered, for each
+window, *where* the maximum was; its backward sends the whole incoming gradient to that winning
+cell and zero everywhere else — the same on/off gate as ReLU's mask, and the second time this
+book's answer to "how do you differentiate a choice?" is *remember the choice, route the
+gradient through it*. (At an exact tie the max isn't differentiable, but ties between continuous
+values are a measure-zero event; every implementation just picks the first winner.) Average
+pooling spreads the gradient evenly: each input cell in a window receives $dY/P^2$.
+
+One last piece of arithmetic joins the toolkit. He initialization (Module 02) scales weight
+draws by $\sqrt{2/\text{fan-in}}$, and a conv output unit's fan-in is everything one dot product
+reads: $C \cdot K_H \cdot K_W$ — 25 for a single-channel 5×5, 150 for our second layer. Same
+rule, new count.
+
+## The code: the same chain rule, now with four more loops
+
+Everything above is maybe twenty lines of code, written straight from the formulas. The forward
+pass in C ([`lib/c/nanograd/conv.c`](https://github.com/shaia/deep-learning-from-scratch/blob/main/lib/c/nanograd/conv.c)
+— convolution and pooling join the shared library this module, alongside Module 02's layers):
+
+```c
+/* Y[i,f,u,v] = b[f] + sum_{c,p,q} K[f,c,p,q] * X[i,c,u+p,v+q] */
+for (int i = 0; i < n; i++)
+    for (int f = 0; f < F; f++)
+        for (int u = 0; u < OH; u++)
+            for (int v = 0; v < OW; v++) {
+                double acc = b[f];
+                for (int c = 0; c < C; c++)
+                    for (int p = 0; p < KH; p++)
+                        for (int q = 0; q < KW; q++)
+                            acc += K[((f * C + c) * KH + p) * KW + q]
+                                 * X[((i * C + c) * H + (u + p)) * W + (v + q)];
+                Y[((i * F + f) * OH + u) * OW + v] = acc;
+            }
+```
+
+Seven nested loops, and every one of them earns its place: batch, filter, two output
+coordinates, then channel and two kernel taps for the dot product. The Python reference
+(`naive_conv2d_forward` in
+[`python/lenet.py`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/03-lenet/python/lenet.py))
+is the same seven loops with NumPy indexing, kept as the module's ground truth.
+
+The backward pass reuses the *same* loop nest — walk the output cells again, and this time push
+each cell's gradient `g` back into the bias, the kernel, and (when a layer sits below) the
+input:
+
+```c
+double g = dY[((i * F + f) * OH + u) * OW + v];
+if (g == 0.0) continue;        /* ReLU and pooling leave most cells dead */
+db[f] += g;
+for (int c = 0; c < C; c++)
+    for (int p = 0; p < KH; p++)
+        for (int q = 0; q < KW; q++) {
+            dK[...] += g * X[((i * C + c) * H + (u + p)) * W + (v + q)];
+            if (dX) dX[((i * C + c) * H + (u + p)) * W + (v + q)]
+                        += g * K[...];
+        }
+```
+
+No flipped-kernel gymnastics in sight — writing the backward as "for each output, scatter to
+everything that produced it" implements the flipped convolution *implicitly*, because the
+indices `u+p`, `v+q` do the substitution for us. The formula and the loop are the same fact in
+two notations.
+
+Max pooling's forward stores each window winner's flat offset in an `idx` array; its backward is
+then two lines — zero the buffer, scatter:
+
+```c
+for (int j = 0; j < n * C * H * W; j++) dX[j] = 0.0;
+for (int o = 0; o < n * C * OH * OW; o++)
+    dX[idx[o]] += dY[o];       /* winner takes the whole gradient */
+```
+
+And here is this chapter's favorite C fact. After the second pooling layer we must "flatten" the
+$(n, 16, 4, 4)$ feature maps into $(n, 256)$ rows for the dense head — and in C **the flatten
+does not exist**. Our tensors are flat row-major `NCHW` buffers, `X[((i*C + c)*H + h)*W + w]`,
+which means sample $i$'s 256 feature values already sit contiguously, one sample per row:
+*exactly* the $(m, n_\text{in})$ matrix layout `ng_linear_forward` has expected since Module 02.
+In [`c/lenet.c`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/03-lenet/c/lenet.c)
+the pooled buffer is simply passed to the linear layer, and a comment marks the spot where
+nothing happens. The Python `Flatten` layer is a `reshape` — also free — existing mostly so the
+`Sequential` stack can run uniformly and restore shapes on the way back.
+
+### The toy program, end to end
+
+With the ops in the library,
+[`c/lenet.c`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/03-lenet/c/lenet.c)
+reads like a table of contents for the whole chapter. Two independent RNG streams (data and
+weights, so neither can perturb the other), fixed-size buffers for every activation and
+gradient, and then a training step that is just the forward chain and its mirror image:
+
+```c
+/* forward: conv -> ReLU -> maxpool -> (flatten: free) -> linear -> loss */
+ng_conv2d_forward(X, K1, b1, Z, N, 1, 8, 8, 4, 3, 3);
+ng_relu_forward(Z, A, N * 4 * 6 * 6);
+ng_maxpool2d_forward(A, POOLED, IDX, N, 4, 6, 6, 2);
+ng_linear_forward(POOLED, W2, b2, LOGITS, N, 36, 2);
+double loss = ng_softmax_ce_forward(LOGITS, y, P, N, 2);
+
+/* backward: the reversed walk */
+ng_softmax_ce_backward(P, y, DLOGITS, N, 2);
+ng_linear_backward(POOLED, W2, DLOGITS, DPOOL, gW2, gb2, N, 36, 2);
+ng_maxpool2d_backward(IDX, DPOOL, DA, N, 4, 6, 6, 2);
+ng_relu_backward(Z, DA, DZ, N * 4 * 6 * 6);
+ng_conv2d_backward(X, K1, DZ, NULL, gK1, gb1, N, 1, 8, 8, 4, 3, 3);
+```
+
+Backpropagation through a CNN is *still* the reversed walk it was in Module 01 — pooling and
+convolution slot into the chain like any other layer, each consuming the gradient the layer
+above produced. Note the `NULL`: the first conv touches the raw data, so nobody needs $dX$
+there, and the library skips computing it. Adam then updates all four parameter arrays, with the
+bias-correction powers advanced by multiplication rather than `pow()` — the Module-02 trick that
+keeps C and Python from disagreeing about a last bit.
+
+The Python mirror in `python/lenet.py` deliberately contains **two** implementations. `ToyCNN`
+is a scalar, flat-array, loop-for-loop twin of the C — the agreement gate — while
+`build_toy_cnn()` assembles the identical network from the vectorized `nanograd` layers
+(`Conv2D`, `ReLU`, `MaxPool2D`, `Flatten`, `Linear`) drawing the same He init from the same
+seed. A third test gate pins the two Python paths to each other, so the readable version and
+the fast version can never silently drift apart.
+
+The naive loops are the definition, and in C they are also fast enough. In Python they are not —
+NumPy pays an interpreter toll per index — and this is where the one genuinely clever trick of
+the chapter comes in: **im2col**. Copy every 5×5 patch out as a *row* of one big matrix (a
+`(n·24·24, 25)` matrix for our first layer), reshape the kernel bank to `(6, 25)`, and the
+entire convolution — all filters, all positions, all images — collapses into a single matrix
+multiplication:
+
+```python
+def forward(self, X):
+    self.cols = im2col(X, KH, KW)          # (n*OH*OW, C*KH*KW): one patch per row
+    Kmat = self.K.reshape(F, C * KH * KW)  # one filter per row
+    out = self.cols @ Kmat.T + self.b      # ONE matmul = the whole convolution
+    return out.reshape(n, OH, OW, F).transpose(0, 3, 1, 2)
+```
+
+Interior pixels get copied into 25 different rows — im2col trades memory redundancy for the one
+operation computers do at full speed. In the notebook the two paths agree to `1.3e-15` and the
+matmul version is **about 270× faster**; the backward pass rides the same trick (two matmuls,
+then the adjoint `col2im` scatter-adds overlapping patch gradients back — which is precisely
+$dX$). This is not just our trick: under every framework's `conv2d` lives some descendant of
+im2col or its Fourier and Winograd cousins. Convolution, in practice, *is* matrix
+multiplication wearing a costume.
+
+## The gradient check, and C↔Python agreement
+
+Module 03 adds the most index-heavy code in the book so far — seven-deep loops are exactly where
+off-by-one bugs go to hide. The verification gates stay merciless about it.
+
+First, honesty: every hand-written backward is checked against centered finite differences.
+Nudge one weight by $h$, run the forward twice, difference the losses — if the analytic gradient
+is right, the two agree to about `1e-8`, and
+[`tests/test_agreement.py`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/03-lenet/tests/test_agreement.py)
+demands it for `Conv2D`'s $dK$, $db$, and $dX$, both poolings, and the whole toy CNN
+end-to-end through softmax cross-entropy. (Max pooling gets continuous random inputs so its
+measure-zero kinks stay unvisited.) The im2col fast path must additionally match the naive
+seven-loop definition at `1e-12` — same arithmetic, different order.
+
+Second, agreement: the C and Python implementations train the same tiny CNN on the same toy data
+(next section) from the same RNG streams, in the same operation order — the loop nests above are
+a *contract*, not a style choice — and must land on the same trained network. After 300 Adam
+steps, each side prints a six-value fingerprint at full `%.17g` precision: final loss, accuracy,
+`wsum` (a checksum summing all 114 parameters in a fixed order, so *any* divergence anywhere
+poisons it), and three sentinel weights. The test parses C's `FINAL` line, runs the Python
+mirror, and compares. The gate is `1e-9` relative; the observed drift is around `1e-15` — the
+last-ulp residue of `exp` and `sqrt` differing across math libraries, after three hundred
+steps of convolution, pooling's argmax routing, and Adam's moment arithmetic agreeing about
+everything else. The scalar-mirror treatment is reserved for the toy: MNIST runs only on the
+vectorized path and is checked by metric, because bit-tracking a 44,426-parameter training run
+buys no additional honesty that the toy hasn't already bought.
+
+## Play with it
+
+Below is the whole mechanism under your cursor: a real MNIST digit, a 5×5 kernel, and the
+feature map being written one dot product at a time.
+
+<ConvWidget />
+
+Keep one eye on the running $\Sigma$ readout under the kernel — that number *is* the formula
+from the math section, evaluated live: twenty-five products, one sum, one feature-map cell. The
+purple square on the input is the receptive field, the only pixels that cell can ever know
+about; everything outside it is, to this one dot product, not merely ignored but invisible. Drag
+slowly across a stroke and watch the sum swing positive, cross zero on the stroke's body, and
+swing negative on the far side — the worked example from earlier, now with real handwriting.
+
+Things to try. Pick **vertical edge** and watch *where* the map lights up — positive (amber) on
+one side of each down-stroke, negative (blue) on the other; a "7" answers a vertical question
+mostly along its diagonal and stem. Switch to **horizontal edge** and the same digit gives
+opposite answers. **Blur** just averages — no sign structure at all — and hovering shows how
+little one position's answer depends on the exact pixel underneath. Then switch to **learned
+#1–#6**: those are the actual kernels our trained network invented (exported from the trained
+model, not redrawn), and the game is to say *which* hand-designed preset each one most resembles
+— every one of them is some flavor of oriented edge or stroke detector.
+
+## Watch it
+
+The whole chapter in eighty seconds: what flattening wastes, the kernel sliding, pooling
+collapsing the map, the full stack, and the six filters LeNet-5 actually learned.
+
+<figure>
+  <video controls playsinline preload="metadata" width="720" style="max-width:100%;height:auto;border-radius:8px">
+    <source src={`${import.meta.env.BASE_URL}media/03-lenet.mp4`} type="video/mp4" />
+    Your browser does not support the video tag.
+  </video>
+  <figcaption style="font-size:0.85rem;color:var(--color-muted);margin-top:0.5rem">
+    A 5×5 kernel sweeps a digit and its feature map fills in cell by cell; pooling halves the
+    map; the LeNet stack runs 28×28 down to 10 logits; and the six learned first-layer filters
+    show their response maps — edge detectors nobody designed.
+  </figcaption>
+</figure>
+
+## Toy → real: bars, then 98.5% on MNIST
+
+As always, the mechanism proves itself on a toy first. Ours is **bars**: sixteen noisy 8×8
+images, each containing one full-brightness bar — vertical (class 0) or horizontal (class 1) —
+at a random position. It is the smallest problem where locality genuinely pays: position is
+random, so any fixed-position detector (an MLP's only kind) must memorize all the positions,
+while a single oriented 3×3 kernel, slid everywhere, solves the problem *structurally*. A
+four-filter CNN with 114 parameters — `conv 4@3×3 → ReLU → maxpool → linear` — hits 100%
+within thirty Adam steps, in both C and NumPy, matching to ~`1e-15`. And then the payoff of a
+model small enough to look at: plot the four trained 3×3 kernels, and they *are* oriented edge
+detectors — strong vertical and horizontal structure, invented from gradients alone, because
+that is the only question on this data worth asking everywhere.
+
+Then the real thing. The full network is LeNet-5's silhouette with Module 02's toolkit inside:
+
+```
+conv 6@5×5 → ReLU → maxpool 2×2      28×28 → 6@24×24 → 6@12×12       156 params
+conv 16@5×5 → ReLU → maxpool 2×2     → 16@8×8 → 16@4×4             2,416
+flatten → 120 → ReLU → 84 → ReLU → 10 logits              30,840 + 10,164 + 850
+                                                          total: 44,426
+```
+
+He init, Adam at `1e-3`, batch 128, the full 60,000 training images, **three epochs** — a few
+minutes of pure NumPy on a laptop:
+
+| epoch | train loss | test accuracy |
+|-------|-----------:|--------------:|
+| 0 | 0.260 | 97.00% |
+| 1 | 0.086 | 98.30% |
+| 2 | 0.062 | **98.46%** |
+
+The verification gate asserts ≥ 98%, and the run clears it with margin — **154 of 10,000** test
+digits missed. Module 01's MLP, trained far longer, reached 97% with $101{,}770$ parameters; the
+CNN beats it by half the errors using **fewer than half the weights**, because those weights are
+spent on assumptions that are actually true of images. (The 1998 paper's full recipe, trained
+for twenty passes with its own tricks, reached 0.95% error; our three NumPy epochs are chasing
+the mechanism, not the leaderboard.)
+
+The notebook then does the thing this chapter has been promising: it *looks inside*. Conv1's six
+trained 5×5 kernels, plotted as signed heatmaps, are oriented edge and stroke detectors — the
+toy's four kernels again, discovered independently at MNIST scale, and Hubel and Wiesel's simple
+cells a third time, discovered by gradient descent. (These same six kernels are the "learned
+#1–#6" presets in the widget above — exported from this training run, not redrawn.) Conv2's 150-
+weight volumes resist flat plotting — they live in six-channel feature space, not pixel space —
+which is itself the lesson: interpretability gets harder exactly as representations get more
+abstract. And the misclassified gallery parades the 154 failures, mostly digits a human would
+also squint at: gaunt 9s mistaken for 4s, 7s crossed like 2s.
+
+For honesty across the aisle, the
+[notebook](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/03-lenet/notebook.ipynb)
+closes by rebuilding everything in the frameworks. PyTorch first, strictly: `F.conv2d` and
+`F.max_pool2d` are handed our exact kernels in float64 and the same upstream gradients, and
+forward outputs, $dK$, $db$, $dX$, and every parameter gradient of the full toy CNN match our
+hand-written versions to ~`1e-15` — there is one right answer and both implementations sit on
+it. Then TensorFlow (a `GradientTape` LeNet: **98.69%**) and Keras (the same network in nine
+lines: **98.63%**) confirm the architecture reaches the same place, at the same cost, whoever
+implements it.
+
+## What LeNet-5 actually was
+
+What we built is LeNet-5's *shape* filled with 2020s components. The honest thing is to lay the
+1998 original beside it, because every difference is a lesson from Module 02 applied backward
+in time — and because the original's choices were not mistakes, but correct answers to 1998's
+constraints.
+
+Walk the real LeNet-5 from the paper. Input is not 28×28 but **32×32** — MNIST digits are padded
+with a border so that a first-layer receptive field can *center* on strokes at the image's edge
+rather than half-fall off it (with valid 5×5 convolutions, only pixels ≥ 2 from the border get
+to be a window's center). Then C1: 6 feature maps of 5×5 convolutions, just like ours. Then S2 —
+and here the differences start. LeNet-5's "subsampling" is average pooling *with learnable
+knobs*: each map's 2×2 average is multiplied by a trained coefficient, given a trained bias,
+and passed through a sigmoid — pooling as a tiny neuron. Modern practice (and our build) found
+the knobs unnecessary: a plain max does the summarizing job with zero parameters and a friendlier
+gradient (a clean route, rather than a sigmoid's squash).
+
+Between S2 and C3 sits the original's most curious artifact: the **connection table**. Our conv2
+reads all six input channels with every filter. LeNet-5's sixteen C3 maps each read only a
+hand-chosen *subset* — the first six read three adjacent maps, the next nine read four, one
+reads all six — a sparse wiring diagram printed as Table 1 of the paper. The stated reasons: it
+cut multiplications (1998 mattered), and it *broke symmetry* — different filters see different
+inputs, so they are pushed toward learning different features. Modern nets dropped the table
+(dense connectivity plus random init breaks symmetry fine, and the compute stopped mattering),
+which makes it easy to forget the table was also an idea with descendants — grouped convolutions,
+of which AlexNet's two-GPU split and today's depthwise-separable layers are the direct family
+line.
+
+The activations are **scaled tanh**: $f(a) = 1.7159 \tanh(\tfrac{2}{3} a)$, constants chosen so
+that $f(\pm 1) = \pm 1$ — hand-tuning the function so that unit-variance signals stay
+unit-variance through depth. Read that twice: it is *initialization-era variance control, done
+inside the activation*, a decade before Xavier and He wrote down the general rule. The weight
+init, uniform in $\pm 2.4 / \text{fan-in}$, is a Xavier ancestor by the same logic. Even the
+optimizer rhymes: the paper trains with a *stochastic diagonal Levenberg–Marquardt* method that
+maintains a **per-parameter learning rate** from second-derivative estimates — squint, and Adam
+is the modern answer to exactly the itch it was scratching.
+
+The output layer is the strangest part to modern eyes: not softmax but **RBF units**, one per
+class, each scoring the 84-dimensional F6 vector by its squared distance to a fixed prototype —
+and the prototypes are stylized 7×12 *bitmaps of the characters themselves*. Distance small,
+class likely. It was built that way for the sake of the surrounding system (rejecting
+non-digits, sharing a printable-character alphabet); softmax cross-entropy (our Module 01
+machinery) replaced it everywhere because it trains better and needs no hand-drawn prototypes.
+
+And that surrounding system is the paper's forgotten half. *Gradient-Based Learning Applied to
+Document Recognition* spends its last thirty pages on **graph transformer networks** — a scheme
+for training the entire check-reading pipeline (field location, segmentation into candidate
+characters, recognition, and a language-model-ish interpretation of amounts) as *one*
+differentiable system, gradients flowing through the graph of hypotheses end to end. The
+deployed NCR system was that whole pipeline. If "train the entire system end-to-end with
+gradients, not just the recognizer" sounds like the thesis of modern deep learning — it is, and
+this is the paper that shipped it to a bank near you in 1998.
+
+Step back from the parts list and the pattern is hard to miss: nearly every "odd" choice in
+LeNet-5 is a hand-crafted, special-case solution to a problem the field later solved *in
+general*. The scaled tanh hand-balances variance; Xavier and He derive the balance from fan-in.
+The diagonal Levenberg–Marquardt optimizer hand-estimates per-parameter step sizes; Adam
+estimates them from running moments, for any architecture. The C3 table hand-rations compute;
+hardware growth made the ration pointless. This is what progress in deep learning has mostly
+looked like — not new dreams, but *general* solutions replacing bespoke ones, so that the same
+recipe works without a resident genius tuning it.
+
+Our modernizations, then, in one honest table: ReLU where tanh saturated (Module 02's activation
+lesson), max pooling where trained averages added knobs without value, He init where $2.4/F$
+guessed, Adam where diagonal Levenberg–Marquardt labored, softmax where RBF prototypes posed,
+full connectivity where the C3 table rationed multiplications. The notebook runs the closest
+in-library approximation of the 1998 recipe (tanh, average pooling, Xavier) head-to-head against
+our build on a 10k-image budget: **92.0% versus 94.3%** after two epochs. The old machine works
+— it just climbs slower, exactly as Module 02 predicts.
+
+## What it couldn't do
+
+If convolution was this good in 1998 — deployed, profitable, under 1% error — why did computer
+vision spend the next decade mostly ignoring it?
+
+Because outside of digits, the recipe starved. Scale the images from 28×28 to real photographs
+and the compute explodes — and 1998 had CPUs measured in hundreds of megahertz, so training
+LeNet-5 took days; a photo-scale network was out of the question. Scale the *classes* from 10
+digits to the actual visual world and the data requirement explodes too — and nothing like
+ImageNet existed. Meanwhile the machine-learning mainstream had found support vector machines:
+convex, elegant, theoretically clean, and on the small datasets of the era, just as accurate as
+a CNN with none of the dark art. The 1998 paper itself shows SVMs breathing down LeNet's neck on
+MNIST. Grad students follow the gradient; the field's flowed away from neural networks, and
+convolutional nets spent the 2000s as a niche kept alive by a stubborn few — LeCun among them —
+waiting for the two exponentials that would change the answer.
+
+The in-between years were not empty — they were *narrow*. CNNs kept winning wherever the data
+was industrial and the domain was bounded: check and form reading, an early face-detection
+system, document analysis. LeCun kept building them at NYU; a small community kept the craft
+alive on datasets like NORB and Caltech-101, forever a few points shy of convincing anyone. The
+2006 "deep learning" revival — Hinton's deep belief networks, the rebranding of layer-stacking
+as a research program — rewarmed the climate, and by the late 2000s the first GPU
+implementations of CNNs were posting suspiciously good numbers on small benchmarks. Everything
+was in place except the demonstration nobody could argue with.
+
+Both missing exponentials arrived by 2012. Video games had spent the 2000s subsidizing massively
+parallel processors
+— GPUs — that happened to be shaped exactly like a convolution. And the web plus Amazon
+Mechanical Turk produced ImageNet: 1.2 million labeled photographs, a thousand classes. Put
+LeNet's recipe on that fuel, scale it up, and add a few of Module 02's tricks at scale — that is
+**AlexNet**, the 2012 result that ended the argument and started the era this book spends the
+rest of its chapters in. Same convolutions. Same weight sharing. Same backprop. Just three
+orders of magnitude more of everything.
+
+## Exercises & what's next
+
+1. **Swap the pooling.** One argument — `run_mnist(pool='avg')` — retrains with LeNet-5's
+   averages instead of max. Compare the accuracy curve; then explain *why* max usually edges out
+   average for recognition (what does an average do to a strong, small detection?).
+2. **Break the fan-in.** Re-init conv2 as if its fan-in were 25 instead of 150 (edit
+   `he_normal_conv2d`'s std for that one layer). Watch the first epoch: where do the activations
+   sit, and what does Module 02 say should happen?
+3. **Receptive field by hand.** One conv2 output cell sees a 5×5 patch of pooled map, each
+   pooled cell a 2×2 patch of conv1's map, each conv1 cell a 5×5 patch of input. Work out the
+   input patch one conv2 cell ultimately sees (the assignment checks your answer — it is larger
+   than you first think).
+4. **Data efficiency.** Train the CNN with `train_n=1000` and Module 02's MLP on the same 1,000
+   images. The gap is the value of the two assumptions — locality and weight sharing — measured
+   in accuracy per example.
+5. **The C3 table.** In the notebook's historical corner, implement LeNet-5's sparse
+   connectivity as a fixed 6×16 mask on conv2's kernel and retrain. How much accuracy does the
+   1998 compute budget cost on 2020s hardware?
+
+Then go deeper into the running code: the self-verifying
+[`notebook.ipynb`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/03-lenet/notebook.ipynb)
+rebuilds every figure above and cross-checks against PyTorch/TF/Keras, while
+[`assignment.ipynb`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/03-lenet/assignment.ipynb)
+hands you the four load-bearing pieces — the conv forward, the kernel gradient, max-pool's
+routing, He init for kernels — to implement yourself, graded against finite differences and the
+canonical library. All of it lives in
+[`topics/03-lenet/`](https://github.com/shaia/deep-learning-from-scratch/tree/main/topics/03-lenet).
+
+The network can see now — locally, translation-tolerantly, cheaply. What it cannot yet do is see
+*big*: real photographs, a thousand classes, a million images, layers deep enough to turn edges
+into textures into parts into things. Doing that took a hardware accident, a dataset of
+unprecedented ambition, and a bag of regularization tricks strong enough to keep sixty million
+parameters honest. That story has a date — September 30, 2012 — and a name.
+
+---
+
+*Next: [AlexNet →](/posts/04-alexnet/) — the same convolutions, three orders of magnitude more
+compute, and the week computer vision changed its mind.*
