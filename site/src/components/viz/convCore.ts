@@ -258,11 +258,16 @@ export function mountConvWidget(
     const rect = canvas.getBoundingClientRect();
     const x = ((ev.clientX - rect.left) / rect.width) * canvas.width;
     const y = ((ev.clientY - rect.top) / rect.height) * canvas.height;
-    let u = -1;
-    let v = -1;
+    // The input-panel branch can legitimately produce u/v down to -2 (window
+    // center near the border, clamped below), so "no panel hit" needs its own
+    // flag rather than a sentinel value.
+    let hit = false;
+    let u = 0;
+    let v = 0;
     if (x >= IN_X && x < IN_X + IMG * CELL_IN && y >= TOP && y < TOP + IMG * CELL_IN) {
       u = Math.floor((y - TOP) / CELL_IN) - 2;
       v = Math.floor((x - IN_X) / CELL_IN) - 2;
+      hit = true;
     } else if (
       x >= OUT_X &&
       x < OUT_X + OUT * CELL_OUT &&
@@ -271,8 +276,9 @@ export function mountConvWidget(
     ) {
       u = Math.floor((y - TOP) / CELL_OUT);
       v = Math.floor((x - OUT_X) / CELL_OUT);
+      hit = true;
     }
-    if (u < -2 && v < -2) return;
+    if (!hit) return;
     u = Math.max(0, Math.min(OUT - 1, u));
     v = Math.max(0, Math.min(OUT - 1, v));
     playing = false;
