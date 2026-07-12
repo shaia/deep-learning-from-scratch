@@ -79,6 +79,41 @@ void   ng_softmax_ce_backward(const double *P, const int *y,
                               double *dlogits, int m, int k);
 
 /* ---------------------------------------------------------------------------
+ * Convolution + pooling (Module 03). Images are flat row-major NCHW,
+ * X[((i*C + c)*H + h)*W + w]; kernels are (F,C,KH,KW), K[((f*C + c)*KH + p)*KW + q]
+ * (named K -- W already means image width). "conv" is cross-correlation (no
+ * kernel flip), stride 1, valid padding. Gradients are SUMMED over the batch
+ * (the 1/m lives at the loss); dX may be NULL for the first layer.
+ *
+ * Loop-nest contract (keeps C<->Python agreement within tolerance): forward
+ * and backward both run i,f,u,v outer / c,p,q inner -- see conv.c.
+ * ------------------------------------------------------------------------- */
+void ng_conv2d_forward(const double *X, const double *K, const double *b,
+                       double *Y, int n, int C, int H, int W,
+                       int F, int KH, int KW);
+void ng_conv2d_backward(const double *X, const double *K, const double *dY,
+                        double *dX, double *dK, double *db,
+                        int n, int C, int H, int W, int F, int KH, int KW);
+
+/* Non-overlapping PxP pooling, stride P (H, W divisible by P). Max pooling
+ * caches each window winner's flat offset into X in `idx` (length n*C*(H/P)*(W/P)),
+ * so backward is a pure gradient scatter; ties go to the first maximum in p,q
+ * scan order, matching NumPy argmax. Average pooling spreads dY/(P*P) evenly. */
+void ng_maxpool2d_forward(const double *X, double *Y, int *idx,
+                          int n, int C, int H, int W, int P);
+void ng_maxpool2d_backward(const int *idx, const double *dY, double *dX,
+                           int n, int C, int H, int W, int P);
+void ng_avgpool2d_forward(const double *X, double *Y,
+                          int n, int C, int H, int W, int P);
+void ng_avgpool2d_backward(const double *dY, double *dX,
+                           int n, int C, int H, int W, int P);
+
+/* Kernel init: He/Xavier with conv fan-in = C*KH*KW (SMALL kept for ablation).
+ * Fills K flat in row-major (F,C,KH,KW) order from `r`; zeroes b (length F). */
+void ng_init_conv2d(double *K, double *b, int F, int C, int KH, int KW,
+                    NgRng *r, NgInit kind);
+
+/* ---------------------------------------------------------------------------
  * Optimizers, over a flat parameter array of length n. State buffers (velocity
  * / running averages / moments) are caller-owned and zero-initialized once.
  * L2 weight decay adds weight_decay*theta to the gradient.

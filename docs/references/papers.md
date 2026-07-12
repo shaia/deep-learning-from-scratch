@@ -25,6 +25,7 @@ prehistory that leads into it. One-line summaries capture *why the paper mattere
     approximation theorem: existence, not learnability.
   - LeCun, Bottou, Bengio & Haffner (1998), *Gradient-Based Learning Applied to Document
     Recognition* — source of MNIST, the module's real-data benchmark (main paper for Module 03).
+    [doi:10.1109/5.726791](https://doi.org/10.1109/5.726791)
 - **02 Making deep nets trainable**
   - Glorot & Bengio (2010), *Understanding the Difficulty of Training Deep Feedforward Networks*
     — Xavier initialization.
@@ -34,8 +35,17 @@ prehistory that leads into it. One-line summaries capture *why the paper mattere
 
 ## Era 1 — The vision revolution
 
-- **03 LeNet-5** — LeCun et al. (1998), *Gradient-Based Learning Applied to Document
-  Recognition* — convolutions, pooling, weight sharing.
+- **03 LeNet-5** — LeCun, Bottou, Bengio & Haffner (1998), *Gradient-Based Learning Applied to
+  Document Recognition*, Proc. IEEE 86(11) — convolutions, pooling, weight sharing; also the
+  source of MNIST and of graph transformer networks (the check-reading system).
+  [doi:10.1109/5.726791](https://doi.org/10.1109/5.726791)
+  - Hubel & Wiesel (1962), *Receptive Fields, Binocular Interaction and Functional Architecture
+    in the Cat's Visual Cortex* — simple/complex cells: the biological blueprint for
+    local-detector + pooling hierarchies.
+  - Fukushima (1980), *Neocognitron: A Self-organizing Neural Network Model* — the CNN
+    architecture (replicated local features, pooling, hierarchy), without end-to-end learning.
+  - LeCun et al. (1989), *Backpropagation Applied to Handwritten Zip Code Recognition* —
+    backprop meets weight sharing; the first trained-end-to-end, deployed CNN.
 - **04 AlexNet** — Krizhevsky, Sutskever & Hinton (2012), *ImageNet Classification with Deep
   Convolutional Neural Networks* — the result that started the modern era.
 - **05 ResNet** — He et al. (2015), *Deep Residual Learning for Image Recognition* — residual

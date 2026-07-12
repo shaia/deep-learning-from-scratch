@@ -25,6 +25,20 @@ and math use the same names, the reader never has to translate.
 | $\ell$ | `layer` | layer index |
 | $t$ | `t` | timestep (sequences) |
 
+### Convolutions (from Module 03)
+
+| Symbol | Code name | Meaning |
+|--------|-----------|---------|
+| $K$ | `K` | conv kernel bank, shape $(F, C, K_H, K_W)$ — `K` because `W` means image width |
+| $F$ | `F` / `out_ch` | number of filters (output channels) |
+| $C$ | `C` / `in_ch` | input channels |
+| $H, W$ | `H`, `W` | image height, width (NCHW layout: `X[i, c, h, w]`) |
+| $K_H, K_W$ | `KH`, `KW` | kernel height, width |
+| $u, v$ | `u`, `v` | position in the output feature map |
+| $p, q$ | `p`, `q` | position inside the kernel (the taps) |
+| $P$ | `P` | pooling window size (and stride; non-overlapping) |
+| $S$ | `stride` | conv stride (Module 03 uses 1) |
+
 ## Conventions
 
 - **Vectors** lowercase ($x$, $w$); **matrices** uppercase ($X$, $W$). In code, `W` for a

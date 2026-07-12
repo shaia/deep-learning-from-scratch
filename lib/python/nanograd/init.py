@@ -57,9 +57,40 @@ def small_uniform(W, rng: Rng, scale: float = 1.0) -> None:
             W[i, o] = scale * rng.signed()
 
 
+# ---------------------------------------------------------------------------
+# Conv kernels (Module 03). Same idea, different fan-in: a conv output unit
+# reads C*KH*KW inputs (every channel of one kernel-sized patch), so that is
+# the variance that must be controlled. K has shape (F, C, KH, KW) and is
+# filled in flat row-major order -- the exact draw order of ng_init_conv2d in
+# lib/c/nanograd/conv.c -- so the C mirror gets identical kernels.
+# ---------------------------------------------------------------------------
+def _fill_normal_flat(K, rng: Rng, std: float) -> None:
+    """Fill K in flat row-major order with N(0, std^2) draws (bit-exact w/ C)."""
+    flat = K.reshape(-1)             # view, so this writes K in place
+    for j in range(flat.size):
+        flat[j] = std * rng.normal()
+
+
+def xavier_normal_conv2d(K, rng: Rng) -> None:
+    """Glorot init for a conv kernel: std = sqrt(1 / (C*KH*KW))."""
+    _, C, KH, KW = K.shape
+    _fill_normal_flat(K, rng, math.sqrt(1.0 / (C * KH * KW)))
+
+
+def he_normal_conv2d(K, rng: Rng) -> None:
+    """He/Kaiming init for a conv kernel: std = sqrt(2 / (C*KH*KW))."""
+    _, C, KH, KW = K.shape
+    _fill_normal_flat(K, rng, math.sqrt(2.0 / (C * KH * KW)))
+
+
 # Registry so callers (and the notebook's ablation loop) can pick by name.
 INITS = {
     "xavier": xavier_normal,
     "he": he_normal,
     "small": small_uniform,
+}
+
+CONV_INITS = {
+    "xavier": xavier_normal_conv2d,
+    "he": he_normal_conv2d,
 }

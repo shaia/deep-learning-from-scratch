@@ -1,0 +1,109 @@
+---
+// Module 03's interactive: slide a 5×5 kernel over a real MNIST digit and
+// watch the feature map build one dot product at a time. Kernel presets
+// include the six filters conv1 actually learned (from lenetFilters.json).
+// Embed in MDX with:
+//   import ConvWidget from '../../components/viz/ConvWidget.astro'
+import WidgetFrame from './WidgetFrame.astro';
+---
+
+<WidgetFrame
+  title="Slide the kernel"
+  caption="The purple window is the only thing the kernel sees: 25 pixels, scored by 25 shared weights into one feature-map cell. Hover or drag on the input (or the feature map) to move it; switch to an edge preset and watch strokes of that orientation light up; then pick a learned filter — gradient descent invented edge detectors on its own."
+  alt="Three panels: a 28-by-28 handwritten digit with a highlighted 5-by-5 window, the current 5-by-5 kernel drawn as a signed heat grid with its numbers, and a 24-by-24 feature map that fills in cell by cell as the window slides, colored by the sign and size of each response."
+>
+  <canvas id="conv-canvas" width="640" height="290" style="max-width:100%;height:auto;cursor:crosshair"
+  ></canvas>
+
+  <div class="controls">
+    <button id="conv-play" type="button">⏸ Pause</button>
+    <button id="conv-reset" type="button">Reset</button>
+    <label class="ctl">
+      kernel
+      <select id="conv-kernel"></select>
+    </label>
+    <label class="ctl">
+      digit
+      <select id="conv-digit"></select>
+    </label>
+  </div>
+</WidgetFrame>
+
+<script>
+  import { KERNEL_NAMES, N_DIGITS, mountConvWidget, type ConvState } from './convCore';
+
+  const canvas = document.getElementById('conv-canvas') as HTMLCanvasElement | null;
+  const playBtn = document.getElementById('conv-play') as HTMLButtonElement | null;
+  const resetBtn = document.getElementById('conv-reset');
+  const kernelSel = document.getElementById('conv-kernel') as HTMLSelectElement | null;
+  const digitSel = document.getElementById('conv-digit') as HTMLSelectElement | null;
+
+  if (canvas && kernelSel && digitSel) {
+    for (const [i, name] of KERNEL_NAMES.entries())
+      kernelSel.add(new Option(name, String(i)));
+    for (let i = 0; i < N_DIGITS; i++)
+      digitSel.add(new Option(`digit ${i + 1}`, String(i)));
+
+    const w = mountConvWidget(canvas, {
+      onState(s: ConvState) {
+        if (playBtn) playBtn.textContent = s.playing ? '⏸ Pause' : '▶ Play';
+      },
+    });
+
+    if (w.reducedMotion && playBtn) {
+      // Reduced motion: the map draws fully, so there is nothing to play.
+      playBtn.disabled = true;
+      playBtn.textContent = 'autoplay off';
+    }
+    playBtn?.addEventListener('click', () => w.toggle());
+    resetBtn?.addEventListener('click', () => {
+      w.reset();
+      kernelSel.value = '0';
+      digitSel.value = '0';
+    });
+    kernelSel.addEventListener('change', () => w.setKernel(Number(kernelSel.value)));
+    digitSel.addEventListener('change', () => w.setDigit(Number(digitSel.value)));
+  }
+</script>
+
+<style>
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    justify-content: center;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.85rem;
+  }
+  .controls button {
+    padding: 0.35rem 0.9rem;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-bg);
+    color: var(--color-text);
+    cursor: pointer;
+  }
+  .controls button:hover {
+    border-color: var(--viz-accent);
+    color: var(--viz-accent);
+  }
+  .controls button:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .ctl {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--color-muted);
+  }
+  .ctl select {
+    font: inherit;
+    padding: 0.25rem 0.4rem;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-bg);
+    color: var(--color-text);
+  }
+</style>

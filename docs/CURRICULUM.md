@@ -13,7 +13,7 @@ agreement/gradient test · post builds · animation renders.
 | 00 | Perceptron | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
 | 01 | MLP + Backpropagation | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
 | 02 | Making deep nets trainable (init/opt/reg) | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
-| 03 | Convolutions / LeNet-5 | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
+| 03 | Convolutions / LeNet-5 | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
 | 04 | AlexNet | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 | 05 | ResNet | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 | 06 | RNN | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
@@ -53,7 +53,9 @@ Toy: same MLP, ablations. Anim: optimizer trajectories on a loss surface; init e
 ### Era 1 — The vision revolution (1998–2015)
 
 **03 Convolutions / LeNet-5** — *Weight sharing + locality for images.*
-Mechanism: conv, pooling, feature maps. Real: MNIST. Anim: kernel sliding; learned filters.
+Mechanism: conv, pooling, feature maps. Toy: "bars" (vertical vs horizontal, 8×8).
+Real: MNIST (target ≥98%). Anim: kernel sliding; learned filters.
+*Adds conv/pool to `lib/*/nanograd`.*
 
 **04 AlexNet** — *Depth + ReLU + dropout + GPUs break ImageNet.*
 Mechanism: ReLU at scale, dropout, data augmentation. Real: CIFAR-10 (scaled-down).

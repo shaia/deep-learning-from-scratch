@@ -23,3 +23,4 @@ add_subdirectory(lib/c/nanograd)
 
 # One entry per module that links nanograd. Add new modules here as they land.
 add_subdirectory(topics/02-training-toolkit/c)
+add_subdirectory(topics/03-lenet/c)

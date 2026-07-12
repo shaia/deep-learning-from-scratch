@@ -17,7 +17,14 @@ Module 01 derived once, so later modules can stack and reuse them.
     opt.step(net.params(), net.grads())      # update
 """
 
-from .init import he_normal, small_uniform, xavier_normal
+from .conv import AvgPool2D, Conv2D, Flatten, MaxPool2D, col2im, im2col
+from .init import (
+    he_normal,
+    he_normal_conv2d,
+    small_uniform,
+    xavier_normal,
+    xavier_normal_conv2d,
+)
 from .layers import (
     Linear,
     ReLU,
@@ -32,7 +39,9 @@ from .rng import Rng
 __all__ = [
     "Rng",
     "Linear", "Sigmoid", "Tanh", "ReLU", "SoftmaxCrossEntropy",
+    "Conv2D", "MaxPool2D", "AvgPool2D", "Flatten", "im2col", "col2im",
     "Sequential", "mlp",
     "SGD", "RMSProp", "Adam",
     "xavier_normal", "he_normal", "small_uniform",
+    "xavier_normal_conv2d", "he_normal_conv2d",
 ]
