@@ -79,15 +79,26 @@ void   ng_softmax_ce_backward(const double *P, const int *y,
                               double *dlogits, int m, int k);
 
 /* ---------------------------------------------------------------------------
- * Convolution + pooling (Module 03). Images are flat row-major NCHW,
- * X[((i*C + c)*H + h)*W + w]; kernels are (F,C,KH,KW), K[((f*C + c)*KH + p)*KW + q]
- * (named K -- W already means image width). "conv" is cross-correlation (no
- * kernel flip), stride 1, valid padding. Gradients are SUMMED over the batch
- * (the 1/m lives at the loss); dX may be NULL for the first layer.
+ * Convolution + pooling (Module 03; stride/padding from Module 04). Images are
+ * flat row-major NCHW, X[((i*C + c)*H + h)*W + w]; kernels are (F,C,KH,KW),
+ * K[((f*C + c)*KH + p)*KW + q] (named K -- W already means image width).
+ * "conv" is cross-correlation (no kernel flip). Gradients are SUMMED over the
+ * batch (the 1/m lives at the loss); dX may be NULL for the first layer.
+ *
+ * The _strided forms take a stride S and zero-padding `pad`:
+ *   OH = (H + 2*pad - KH)/S + 1,  OW = (W + 2*pad - KW)/S + 1.
+ * The plain forms are Module 03's valid, stride-1 case (S=1, pad=0).
  *
  * Loop-nest contract (keeps C<->Python agreement within tolerance): forward
  * and backward both run i,f,u,v outer / c,p,q inner -- see conv.c.
  * ------------------------------------------------------------------------- */
+void ng_conv2d_forward_strided(const double *X, const double *K, const double *b,
+                               double *Y, int n, int C, int H, int W,
+                               int F, int KH, int KW, int S, int pad);
+void ng_conv2d_backward_strided(const double *X, const double *K, const double *dY,
+                                double *dX, double *dK, double *db,
+                                int n, int C, int H, int W, int F, int KH, int KW,
+                                int S, int pad);
 void ng_conv2d_forward(const double *X, const double *K, const double *b,
                        double *Y, int n, int C, int H, int W,
                        int F, int KH, int KW);
@@ -95,10 +106,17 @@ void ng_conv2d_backward(const double *X, const double *K, const double *dY,
                         double *dX, double *dK, double *db,
                         int n, int C, int H, int W, int F, int KH, int KW);
 
-/* Non-overlapping PxP pooling, stride P (H, W divisible by P). Max pooling
- * caches each window winner's flat offset into X in `idx` (length n*C*(H/P)*(W/P)),
- * so backward is a pure gradient scatter; ties go to the first maximum in p,q
- * scan order, matching NumPy argmax. Average pooling spreads dY/(P*P) evenly. */
+/* PxP max pooling with window stride S: OH = (H-P)/S + 1. S < P overlaps the
+ * windows (AlexNet: P=3, S=2); the plain forms are Module 03's S = P tiles.
+ * Max pooling caches each window winner's flat offset into X in `idx` (one per
+ * output cell), so backward is a pure gradient scatter-ADD (a cell that wins
+ * overlapping windows collects every gradient it won); ties go to the first
+ * maximum in p,q scan order, matching NumPy argmax. Average pooling is
+ * non-overlapping (H, W divisible by P) and spreads dY/(P*P) evenly. */
+void ng_maxpool2d_forward_strided(const double *X, double *Y, int *idx,
+                                  int n, int C, int H, int W, int P, int S);
+void ng_maxpool2d_backward_strided(const int *idx, const double *dY, double *dX,
+                                   int n, int C, int H, int W, int P, int S);
 void ng_maxpool2d_forward(const double *X, double *Y, int *idx,
                           int n, int C, int H, int W, int P);
 void ng_maxpool2d_backward(const int *idx, const double *dY, double *dX,
@@ -112,6 +130,42 @@ void ng_avgpool2d_backward(const double *dY, double *dX,
  * Fills K flat in row-major (F,C,KH,KW) order from `r`; zeroes b (length F). */
 void ng_init_conv2d(double *K, double *b, int F, int C, int KH, int KW,
                     NgRng *r, NgInit kind);
+
+/* ---------------------------------------------------------------------------
+ * Regularization + normalization (Module 04, AlexNet).
+ *
+ * Dropout (inverted), over n entries: draws one uniform per entry from `r` in
+ * order; mask[j] = (u < 1-p) ? 1/(1-p) : 0, Y = X*mask. Backward: dX = dY*mask.
+ * p == 0 is the identity and draws nothing (as in Python). Evaluation simply
+ * skips the call -- the 1/(1-p) scaling already happened.
+ *
+ * Local response normalization across channels (AlexNet Sec. 3.3), NCHW:
+ *   S = k + alpha * sum_{|j-c| <= size/2} X[j]^2,   Y = X * S^-beta
+ * S (same shape as X) is cached for backward.
+ * ------------------------------------------------------------------------- */
+void ng_dropout_forward(const double *X, double *Y, double *mask, int n,
+                        double p, NgRng *r);
+void ng_dropout_backward(const double *mask, const double *dY, double *dX,
+                         int n);
+void ng_lrn_forward(const double *X, double *Y, double *S,
+                    int n, int C, int H, int W,
+                    int size, double alpha, double beta, double k);
+void ng_lrn_backward(const double *X, const double *Y, const double *S,
+                     const double *dY, double *dX,
+                     int n, int C, int H, int W,
+                     int size, double alpha, double beta);
+
+/* ---------------------------------------------------------------------------
+ * Data augmentation (Module 04). X:[n,C,H,W] -> out:[n,C,crop,crop].
+ * Random crop + left-right flip draws three uniforms per image (row offset,
+ * column offset, flip) in that order -- the stream augment.py draws -- and
+ * mirrors only if `flip` is nonzero. Center crop is the evaluation view.
+ * ------------------------------------------------------------------------- */
+void ng_random_crop_flip(const double *X, double *out,
+                         int n, int C, int H, int W, int crop, int flip,
+                         NgRng *r);
+void ng_center_crop(const double *X, double *out,
+                    int n, int C, int H, int W, int crop);
 
 /* ---------------------------------------------------------------------------
  * Optimizers, over a flat parameter array of length n. State buffers (velocity

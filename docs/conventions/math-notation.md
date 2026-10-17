@@ -36,8 +36,21 @@ and math use the same names, the reader never has to translate.
 | $K_H, K_W$ | `KH`, `KW` | kernel height, width |
 | $u, v$ | `u`, `v` | position in the output feature map |
 | $p, q$ | `p`, `q` | position inside the kernel (the taps) |
-| $P$ | `P` | pooling window size (and stride; non-overlapping) |
-| $S$ | `stride` | conv stride (Module 03 uses 1) |
+| $P$ | `P` | pooling window size (stride $P$ unless given: non-overlapping) |
+| $S$ | `stride` | conv / pooling stride (Module 03 uses 1; Module 04's overlapping pool: $P=3, S=2$) |
+| $P_{\text{pad}}$ | `pad` | zero-padding rings on each side (Module 04) |
+
+Output size of a window of width $K$ slid over $H$ (conv or pool):
+$H_{\text{out}} = \lfloor (H + 2P_{\text{pad}} - K)/S \rfloor + 1$ — `conv_out_size(H, K, stride, pad)`.
+
+### Regularization (from Module 04)
+
+| Symbol | Code name | Meaning |
+|--------|-----------|---------|
+| $p$ | `p` / `drop_p` | dropout probability (a unit is silenced with probability $p$) |
+| $m$ | `mask` | dropout mask: $m_j = [u_j < 1-p]/(1-p)$, $u_j \sim U[0,1)$ (inverted dropout) |
+| $\lambda$ | `weight_decay` | L2 weight-decay coefficient |
+| $\mu$ | `momentum` | SGD momentum |
 
 ## Conventions
 

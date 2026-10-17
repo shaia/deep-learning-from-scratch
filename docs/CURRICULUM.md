@@ -14,7 +14,7 @@ agreement/gradient test · post builds · animation renders.
 | 01 | MLP + Backpropagation | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
 | 02 | Making deep nets trainable (init/opt/reg) | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
 | 03 | Convolutions / LeNet-5 | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
-| 04 | AlexNet | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
+| 04 | AlexNet | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
 | 05 | ResNet | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 | 06 | RNN | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 | 07 | LSTM | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
@@ -58,8 +58,11 @@ Real: MNIST (target ≥98%). Anim: kernel sliding; learned filters.
 *Adds conv/pool to `lib/*/nanograd`.*
 
 **04 AlexNet** — *Depth + ReLU + dropout + GPUs break ImageNet.*
-Mechanism: ReLU at scale, dropout, data augmentation. Real: CIFAR-10 (scaled-down).
+Mechanism: ReLU at scale, dropout, data augmentation. Toy: "mirror glyphs" (train on one
+orientation, test on the mirror image). Real: CIFAR-10 (scaled-down AlexNet, target ≥70%).
 Anim: dropout masking; augmentation pipeline; first-layer filters.
+*Adds conv stride/padding, overlapping pooling, Dropout, LRN and crop/flip augmentation to
+`lib/*/nanograd`.*
 
 **05 ResNet** — *Let gradients skip — train hundreds of layers.*
 Mechanism: residual blocks, BatchNorm, degradation problem. Real: CIFAR-10.

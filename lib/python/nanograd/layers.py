@@ -48,6 +48,12 @@ class Linear:
     def grads(self):
         return [self.dW, self.db]
 
+    def astype(self, dtype):
+        """Re-store the parameters at another precision (see Sequential.astype)."""
+        self.W = self.W.astype(dtype)
+        self.b = self.b.astype(dtype)
+        return self
+
 
 # ---------------------------------------------------------------------------
 # Activations: no parameters, so backward just multiplies by the local slope.
@@ -106,6 +112,49 @@ class ReLU:
 
 
 ACTIVATIONS = {"sigmoid": Sigmoid, "tanh": Tanh, "relu": ReLU}
+
+
+# ---------------------------------------------------------------------------
+# Dropout (Module 04; Hinton et al. 2012, Srivastava et al. 2014). During
+# training, every unit is silenced independently with probability p, so each
+# step trains a different random "thinned" sub-network -- and no unit can
+# count on any particular partner being there. That breaks co-adaptation, the
+# brittle teamwork that lets a big network memorize its training set.
+#
+# This is *inverted* dropout: survivors are scaled up by 1/(1-p) at training
+# time, so the expected activation is unchanged and evaluation is a no-op.
+# (AlexNet's paper did the reverse -- no scaling in training, outputs
+# multiplied by 0.5 at test time. Same expectation, more bookkeeping.)
+#
+#   forward:  mask = [u < 1-p] / (1-p),  u ~ U[0,1) per unit;   Y = X * mask
+#   backward: dX = dY * mask   (a dropped unit passed nothing forward, so it
+#                               gets nothing back -- ReLU's gate, but random)
+#
+# Randomness comes from `rng.random(shape)`: a numpy Generator for speed, or
+# a nanograd Rng to draw exactly the C mirror's mask. `training` is flipped
+# by Sequential.train() / .eval(); in eval mode the layer is the identity.
+# ---------------------------------------------------------------------------
+class Dropout:
+    def __init__(self, p: float = 0.5, rng=None, seed: int = 0):
+        assert 0.0 <= p < 1.0, "drop probability must be in [0, 1)"
+        self.p = p
+        self.rng = rng if rng is not None else np.random.default_rng(seed)
+        self.training = True
+        self.mask = None
+
+    def forward(self, X):
+        if not self.training or self.p == 0.0:
+            self.mask = None                 # identity: nothing to undo later
+            return X
+        keep = 1.0 - self.p
+        self.mask = (self.rng.random(X.shape) < keep).astype(X.dtype) / keep
+        return X * self.mask
+
+    def backward(self, dY):
+        return dY if self.mask is None else dY * self.mask
+
+    def params(self): return []
+    def grads(self): return []
 
 
 # ---------------------------------------------------------------------------

@@ -40,6 +40,33 @@ class Sequential:
     def grads(self):
         return [g for layer in self.layers for g in layer.grads()]
 
+    # Module 04: some layers (Dropout) behave differently while training than
+    # while being evaluated. These flip every such layer's `training` flag --
+    # call eval() before measuring accuracy, train() before the next epoch.
+    def train(self):
+        for layer in self.layers:
+            if hasattr(layer, "training"):
+                layer.training = True
+        return self
+
+    def eval(self):
+        for layer in self.layers:
+            if hasattr(layer, "training"):
+                layer.training = False
+        return self
+
+    # Module 04: teaching code runs in float64 (fewer surprises, and the C<->
+    # Python agreement needs it), but at CIFAR scale half the bytes is roughly
+    # half the time -- and float32 is what AlexNet itself trained in. Every
+    # forward/backward follows the dtype of its inputs and parameters, so
+    # casting the parameters (then feeding float32 batches) is the whole
+    # switch. Build the optimizer AFTER this: its state copies the dtype.
+    def astype(self, dtype):
+        for layer in self.layers:
+            if hasattr(layer, "astype"):
+                layer.astype(dtype)
+        return self
+
 
 def mlp(sizes, activation="relu", init="he", rng=None, seed=0):
     """Build an MLP: `sizes` = [n_in, h1, h2, ..., n_out].

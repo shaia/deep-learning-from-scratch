@@ -1,0 +1,688 @@
+---
+title: AlexNet
+moduleNumber: 4
+description: The week computer vision changed its mind. Same convolutions as LeNet, three orders of magnitude more of everything — and the tricks that kept a sixty-million-parameter network from memorizing its data. We trace ImageNet, GPUs and the 2012 result, derive stride, padding, overlapping pooling, ReLU's unbroken gradient and dropout by hand, watch a wide network memorize and dropout stop it, and train a scaled-down AlexNet on CIFAR-10 — from scratch in C and NumPy.
+draft: false
+---
+
+import DropoutWidget from '../../components/viz/DropoutWidget.astro';
+
+## Ten points
+
+On September 30, 2012, at eleven at night Greenwich time, the submission window for the third
+ImageNet Large Scale Visual Recognition Challenge closed. Two weeks later, at a workshop in
+Florence, the organizers put the classification results on a slide. The task was brutal: look at
+a photograph — any of 100,000 test images, drawn from a thousand categories that included 120
+breeds of dog — and name what is in it, with five guesses allowed. The previous two years'
+winners had missed on 28.2% and then 25.8% of the images: hand-engineered features fed to
+support vector machines, the polished state of the art, improving by a couple of points a year.
+
+In 2012 the second-best team missed 26.2%. The best team, a group from the University of Toronto
+calling itself SuperVision, missed **15.3%**.
+
+It is hard to overstate how strange that number looked. Benchmarks move by fractions of a point;
+a field's best ideas, compounding for a decade, had moved this one by a few points. Here was a
+single entry, ten points clear of everybody — and it came from a technique most of the
+computer-vision community had written off: a neural network, trained end to end from raw pixels,
+exactly the kind of model Module 03 built for digits in 1998. The paper describing it —
+*ImageNet Classification with Deep Convolutional Neural Networks*, by Alex Krizhevsky, Ilya
+Sutskever and Geoffrey Hinton — appeared at NIPS that December, and within two years the
+competition's leading entries were almost all convolutional networks. Within three, the systems
+built on them were beating a trained human annotator at the same task.
+
+This chapter is about that network, universally called **AlexNet**, and it has an unusual shape
+for a chapter in this book. The core mechanism is not new — it is Module 03's convolution,
+pooling and backpropagation, unchanged. What is new is everything around it: a network
+**large** enough to see photographs, data large enough to feed it, hardware fast enough to train
+it, and a set of tricks to stop sixty million parameters from simply memorizing a million
+images. Those tricks — **ReLU** at depth, **dropout**, **data augmentation** — are the real
+subject, because they are the part that survived. Every network in the rest of this book uses
+some descendant of them.
+
+## Two exponentials and a dataset
+
+Module 03 ended in 1998, with LeNet-5 reading checks while the rest of machine learning drifted
+toward support vector machines. Three things changed in the next fourteen years, and AlexNet is
+what happened when they finally met.
+
+**The data.** In 2006, Fei-Fei Li, then a young professor at the University of Illinois and soon
+at Princeton, began arguing something unfashionable: that computer vision's bottleneck was not
+the algorithms but the *data*. Benchmarks of the day had tens of categories and thousands of
+images; she wanted every noun in WordNet that could be pictured, with hundreds of photos each.
+Labeling that by hand was impossible for a lab, so ImageNet was labeled by the crowd: from 2008 to
+2010 roughly 49,000 workers on Amazon Mechanical Turk, in 167 countries, sorted over 160
+million candidate images scraped from search engines. ImageNet was presented, as a poster, at
+CVPR 2009 — to modest interest. From 2010 its annual challenge used a 1,000-category subset:
+**1.2 million training images**, the first labeled dataset big enough that a model with millions
+of parameters had a chance of not just memorizing it.
+
+**The hardware.** Video games had spent the 2000s funding a strange processor: thousands of
+small arithmetic units built to do the same simple operation on many pixels at once. In 2007
+NVIDIA's CUDA made those graphics cards programmable for general computation, and a matrix
+multiply — which, as Module 03 showed, is what a convolution becomes — runs on one dozens of
+times faster than on a CPU. Researchers had been running neural networks on graphics cards since
+the mid-2000s; by 2011 Dan
+Cireșan and colleagues in Jürgen Schmidhuber's lab at IDSIA were winning image competitions with
+GPU-trained convolutional nets, including a traffic-sign contest where their system beat human
+volunteers. Alex Krizhevsky, a graduate student of Hinton's, had written his own unusually fast
+CUDA convolution code, cuda-convnet, and used it on CIFAR-10 — a small 32×32 image dataset he
+had assembled in 2009, and the one this chapter trains on.
+
+**The tricks.** Hinton's group had spent the late 2000s on the problem of training deep networks
+at all, and by 2012 had two new tools that would matter: the **rectified linear unit**
+(Nair & Hinton, 2010) and **dropout** (Hinton et al., posted to arXiv in July 2012).
+
+In the usual telling it was Sutskever who was convinced that a big enough convolutional
+network on ImageNet would win, and Krizhevsky who made it run: a network split across two NVIDIA
+GTX 580 gaming cards with 3 GB of memory each, trained for roughly ninety passes over the 1.2
+million images — five to six days, in Krizhevsky's bedroom at his parents' house, as the story is
+usually told. The network had about **60 million parameters**. LeNet-5 had 60 thousand.
+
+The aftermath moved fast. At NIPS that December, in a Lake Tahoe casino hotel, the three authors'
+newly formed company — no products, three employees — was auctioned between Google, Microsoft,
+Baidu and DeepMind; by Cade Metz's account Google won at $44 million. Nearly every leading entry
+in 2013 was a convolutional net; by 2015 the error had fallen to 3.6%, below the roughly 5%
+measured for a trained human annotator. Computer vision changed its mind in about one conference cycle.
+
+| Year | Milestone | What it added |
+|------|-----------|---------------|
+| 2009 | Deng, Li et al., *ImageNet* (CVPR) | a labeled dataset big enough to feed millions of parameters |
+| 2009 | Krizhevsky, CIFAR-10 | the small-image testbed (and cuda-convnet's proving ground) |
+| 2010 | Nair & Hinton, ReLU | the non-saturating unit that makes depth trainable |
+| 2011 | Cireșan et al., GPU CNNs | convolutional nets winning contests on graphics cards |
+| 2012 | Hinton et al., dropout | a regularizer for networks far larger than their data |
+| 2012 | Krizhevsky, Sutskever & Hinton | all of it at once: 15.3% vs 26.2% on ImageNet |
+
+## The intuition: big enough to see, restrained enough to generalize
+
+Here is the problem AlexNet solved, in one sentence: **a network large enough to recognize a
+thousand kinds of objects is large enough to memorize every training image instead — so you need
+a way to give it capacity without letting it cheat.**
+
+The capacity part is LeNet scaled up, and nothing about it is conceptually new. Photographs are
+224 pixels across, not 28, so the network needs more layers to grow its receptive fields to
+object size, and more filters per layer, because a thousand categories need many more kinds of
+evidence than ten digits. Five convolutional layers, three dense layers, 650,000 neurons. Two
+small changes to the convolution keep the cost survivable. A **stride** — sliding the kernel four
+pixels at a time in the first layer instead of one — computes a sixteenth of the positions at the
+layer where the image is largest. **Overlapping pooling** — 3×3 windows every 2 pixels — summarizes
+a little more smoothly than Module 03's disjoint tiles.
+
+The trouble is the arithmetic of memorization. Sixty million adjustable numbers against 1.2
+million training images is about fifty parameters per image. A network that big can, in
+principle, simply store its answers: shape its decision boundary around every individual
+training photo and learn nothing that transfers to a new one. Every model with more parameters
+than constraints faces this; Module 02 met the mild version as overfitting. AlexNet's version was
+severe, and its answer came in three layers.
+
+**First, make depth trainable at all — ReLU.** A sigmoid or tanh unit squashes: for large inputs
+its slope goes to zero, and backpropagation multiplies one slope per layer, so the gradient
+reaching the early layers of a deep tanh network is a product of many small numbers. ReLU's slope
+is exactly 1 wherever the unit is on. Gradients pass through active units at full strength, and
+in the paper's measurement a ReLU network trained six times faster than the same network with
+tanh. (Our own attempt to reproduce that measurement, later in this chapter, holds a surprise.)
+This is not regularization — it is what makes the big network worth having.
+
+**Second, manufacture more data — augmentation.** A photo of a dog, shifted a few pixels or
+mirrored left to right, is still a photo of a dog. So train on random crops and mirror images,
+drawn fresh every pass: each original becomes thousands of slightly different, honestly labeled
+examples. This is the cheapest regularizer there is, and the most principled, because it tells
+the network something *true*: these variations do not change the answer.
+
+**Third, forbid conspiracies — dropout.** During training, silence every hidden unit in the dense
+layers with probability ½, independently, at every step. Each step therefore trains a different
+random sub-network, and no unit can rely on any particular partner being present to fix its
+mistakes. The brittle, co-adapted teamwork that memorization depends on — this unit fires only
+for that training image, because those three other units cover the rest — stops working.
+Hinton's analogy was sexual reproduction: genes that must work with random partners evolve to be
+individually useful. A more operational view: a network with $n$ droppable units contains $2^n$
+thinned sub-networks sharing one set of weights, and dropout trains a random one at every step —
+an ensemble too large to enumerate, averaged for free at test time.
+
+Augmentation and dropout attack overfitting from opposite ends. Augmentation adds *information*:
+it widens what the data shows. Dropout adds *restraint*: it narrows what the network can do with
+whatever data it has. As the toy in this chapter shows, they are not interchangeable.
+
+And they went exactly where they were needed. Count AlexNet's parameters and **96% of them** sit
+in the three dense layers at the top — fc6 alone, connecting a 6×6×256 feature map to 4,096
+units, holds 38 million. Count its arithmetic and **92% of it** is in the five convolutions. So
+dropout went on the dense layers, where the memorizing capacity lived, and the GPUs went to the
+convolutions, where the work was.
+
+## The math: strides, padding, overlap, and a random mask
+
+Notation as in Module 03: images $X$ of shape $(n, C, H, W)$, kernels $K$ of shape
+$(F, C, K_H, K_W)$, output positions $(u, v)$, kernel taps $(p, q)$.
+
+### Stride and padding
+
+Module 03 slid its kernel one pixel at a time and only where it fit. Generalize both. With a
+**stride** $S$ the window's top-left corner moves $S$ pixels per step; with **padding**
+$P_{\text{pad}}$ the input is surrounded by that many rings of zeros, so windows can center on
+border pixels. Output cell $(u, v)$ now reads the padded input starting at $(uS, vS)$:
+
+$$
+Y[i, f, u, v] \;=\; b_f \;+\; \sum_{c, p, q} K[f, c, p, q]\;
+X[i,\, c,\, uS + p - P_{\text{pad}},\, vS + q - P_{\text{pad}}],
+$$
+
+where any tap that lands in the padding reads zero and simply drops out of the sum. Counting the
+valid window positions along one axis gives the formula Module 03 promised:
+
+$$
+H_{\text{out}} \;=\; \left\lfloor \frac{H + 2P_{\text{pad}} - K_H}{S} \right\rfloor + 1 .
+$$
+
+Run AlexNet's first layer through it: 11×11 kernels at stride 4, no padding. On the 224×224 input
+the paper describes, $\lfloor (224 - 11)/4 \rfloor + 1 = 54$ — but the paper's own figure says
+55, and $(227 - 11)/4 + 1 = 55$ exactly. The network really ran on 227×227 crops; "224" is one of
+deep learning's most famous typos, and the formula is how you catch it. At stride 1 the same
+layer would compute $217^2 = 47{,}089$ positions per filter instead of $55^2 = 3{,}025$ — the
+stride buys a factor of 15 at the single most expensive layer, at the price of a coarser map.
+
+The backward pass changes only in its indexing. Each output cell still multiplied one kernel
+weight by one pixel per tap, so the chain rule still sends each $dY$ back to the weight times the
+pixel and to the pixel times the weight:
+
+$$
+\frac{\partial L}{\partial K[f,c,p,q]} = \sum_{i,u,v} dY[i,f,u,v]\; X[i, c, uS{+}p{-}P_{\text{pad}}, vS{+}q{-}P_{\text{pad}}],
+$$
+
+$$
+\frac{\partial L}{\partial b_f} = \sum_{i,u,v} dY[i,f,u,v],
+$$
+
+and $\partial L / \partial X$ collects, for every pixel, the gradients of the output cells whose
+windows covered it, each times the kernel tap that connected them. Gradient landing on a padding
+zero has nowhere to go and is dropped — padding was never an input.
+
+### Overlapping pooling
+
+The same window formula governs pooling. Module 03 used $P = S = 2$: disjoint tiles. AlexNet used
+$P = 3,\ S = 2$: each window shares a row or column with its neighbors, and a cell in the overlap
+can be the maximum of **two** windows (in two dimensions, up to four). The forward pass doesn't
+care. The backward pass must: a value used twice in the forward pass receives the sum of both
+gradients — the chain rule's rule for any shared variable — so the routing of Module 03 becomes a
+scatter-*add*:
+
+$$
+\frac{\partial L}{\partial X[i,c,h,w]} \;=\; \sum_{\text{windows }(u,v)\text{ won by }(h,w)} dY[i,c,u,v].
+$$
+
+The paper reported overlapping pooling lowered error by 0.3–0.4 points and made the network
+"slightly more difficult to overfit". It is a minor trick; the bug it invites, as the assignment
+shows, is not.
+
+### ReLU, at depth
+
+For a chain of layers $a^{(\ell)} = \phi(z^{(\ell)})$, backpropagation multiplies the incoming
+gradient by $\phi'(z^{(\ell)})$ at every layer. For tanh,
+
+$$
+\tanh'(z) = 1 - \tanh^2(z) \;\le\; 1, \qquad \tanh'(\pm 2) \approx 0.07,
+$$
+
+so eight layers of moderately large pre-activations shrink the gradient by orders of magnitude.
+For ReLU, $\phi'(z) = [z > 0]$: exactly 1 on active units. The gradient reaching layer one is
+not attenuated by the activations at all — only redirected by which units are on. (ReLU has its
+own failure, units that never turn on again; Module 02's He initialization is the matching fix.)
+
+### Dropout
+
+Let $h$ be a hidden layer's activations and $p$ the drop probability. During training draw one
+uniform number per unit and form the **mask**
+
+$$
+m_j \;=\; \frac{[\,u_j < 1 - p\,]}{1 - p}, \qquad u_j \sim \mathcal{U}[0, 1), \qquad
+\tilde h = h \odot m .
+$$
+
+Each unit survives with probability $1-p$; survivors are scaled up by $1/(1-p)$ so that
+$\mathbb{E}[\tilde h_j] = h_j$ — the expected activation feeding the next layer is unchanged. At
+test time nothing is dropped and nothing is scaled: the full network, with every unit, is exactly
+the expected thinned network. This is **inverted** dropout, the form every framework uses; the
+2012 paper did the bookkeeping the other way round (no scaling in training, outputs halved at
+test), which gives the same expectation.
+
+The backward pass is one line. A dropped unit contributed nothing to the forward pass, so it gets
+nothing back; a survivor's gradient is scaled by the same factor its activation was:
+
+$$
+\frac{\partial L}{\partial h} \;=\; \frac{\partial L}{\partial \tilde h} \odot m .
+$$
+
+It is ReLU's gate again — a 0/1 switch the forward pass recorded — except that the switch is
+thrown by a random number instead of by the sign of $z$.
+
+### Augmentation
+
+AlexNet trained on random 224×224 crops of 256×256 images, each mirrored left-right with
+probability ½: $32 \times 32$ crop positions times 2 mirrors, the paper's "factor of 2048" more
+training data. At test time it averaged the softmax over ten fixed views — the four corner crops
+and the center crop, each plain and mirrored. It added one more invariance: a random shift of
+every pixel's color along the principal components of the training set's RGB values (*PCA color
+augmentation*), because a photo under warmer light shows the same object. Crops and mirrors cost
+a few lines of indexing. Their mathematics is the statement that the label is unchanged by them.
+
+## The code: the same chain rule, with offsets and a random mask
+
+Convolution and pooling grow their stride and padding in both libraries, and Module 03's
+functions become the special case. In C
+([`lib/c/nanograd/conv.c`](https://github.com/shaia/deep-learning-from-scratch/blob/main/lib/c/nanograd/conv.c)),
+the forward pass is Module 03's seven loops with two new terms in the index and one bounds check:
+
+```c
+for (int c = 0; c < C; c++)
+    for (int p = 0; p < KH; p++)
+        for (int q = 0; q < KW; q++) {
+            const int h = u * S + p - pad, w = v * S + q - pad;
+            if (h < 0 || h >= H || w < 0 || w >= W)
+                continue;            /* a padding zero: adds nothing */
+            acc += K[((f * C + c) * KH + p) * KW + q]
+                 * X[((i * C + c) * H + h) * W + w];
+        }
+```
+
+and `ng_conv2d_forward` — Module 03's call — is now one line that passes `S = 1, pad = 0`. With
+no tap ever out of bounds, Module 03's agreement test still produces the same bits. The NumPy
+im2col version strides its slices (`X[:, :, p:p + S*OH:S, q:q + S*OW:S]`) and pads with `np.pad`;
+its adjoint, col2im, scatters back into a padded buffer and crops the padding off.
+
+Max pooling's backward was already a scatter, so overlap costs nothing in C — the `+=` was there
+all along:
+
+```c
+for (int o = 0; o < n * C * OH * OW; o++)
+    dX[idx[o]] += dY[o];       /* a cell that won two windows gets both */
+```
+
+In NumPy the same line is a trap. `dX[idx] += dY` with repeated indices does *not* accumulate —
+NumPy writes each repeated index once and silently discards the rest — which is exactly the
+overlap case. `np.add.at(dX, idx, dY)` accumulates. The assignment makes you meet this bug on
+purpose, because the finite-difference check only catches it when a test input happens to make
+one cell win two windows.
+
+Dropout in C is a mask and two loops
+([`lib/c/nanograd/nn.c`](https://github.com/shaia/deep-learning-from-scratch/blob/main/lib/c/nanograd/nn.c)):
+
+```c
+const double keep = 1.0 - p;
+for (int j = 0; j < n; j++) {
+    mask[j] = (ng_rng_uniform(r) < keep) ? 1.0 / keep : 0.0;
+    Y[j] = X[j] * mask[j];
+}
+/* backward: dX[j] = dY[j] * mask[j] */
+```
+
+The randomness is the interesting engineering. The C and Python implementations must agree to the
+last bit, so the masks — and the crop offsets, and the mirror coin-flips — must be the same random
+numbers in the same order. Both libraries draw them from the book's 64-bit LCG, each from its own
+stream (separate seeds for data, weights, augmentation and dropout, so that changing one can't
+shift another's numbers). The Python `Dropout` and `random_crop_flip` call `rng.random(shape)`,
+which a fast NumPy generator answers for CIFAR and the LCG answers, element by element, for the
+agreement test. One more library change makes dropout usable: networks now have modes.
+`net.train()` turns dropout on; `net.eval()` turns it off before measuring anything.
+
+### The toy program, end to end
+
+[`c/alexnet.c`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/04-alexnet/c/alexnet.c)
+is the whole 2012 recipe at toy scale — augment, strided conv, overlapping pool, dropout, momentum
+SGD with weight decay:
+
+```c
+ng_random_crop_flip(Xtr, XC, N, 3, 12, 12, 10, 1, &aug_rng);   /* fresh views */
+ng_conv2d_forward_strided(XC, K1, b1, Z, N, 3, 10, 10, 6, 5, 5, 2, 2);
+ng_relu_forward(Z, A, N * 6 * 5 * 5);
+ng_maxpool2d_forward_strided(A, POOLED, IDX, N, 6, 5, 5, 3, 2);
+ng_linear_forward(POOLED, W2, b2, H_PRE, N, 24, 16);
+ng_relu_forward(H_PRE, H, N * 16);
+ng_dropout_forward(H, D, MASK, N * 16, 0.5, &drop_rng);        /* a new thinned net */
+ng_linear_forward(D, W3, b3, LOGITS, N, 16, 2);
+/* ...softmax cross-entropy, then the reversed walk: */
+ng_dropout_backward(MASK, DD, DH, N * 16);
+ng_maxpool2d_backward_strided(IDX, DPOOL, DA, N, 6, 5, 5, 3, 2);
+ng_conv2d_backward_strided(XC, K1, DZ, NULL, gK1, gb1, N, 3, 10, 10, 6, 5, 5, 2, 2);
+/* SGD: v = 0.9 v + (g + 5e-4 w);  w -= lr v   -- AlexNet's update rule */
+```
+
+Backpropagation through dropout and overlapping pooling is still the reversed walk of Module 01:
+dropout gates the gradient like ReLU, pooling routes and now adds, the strided convolution scatters
+through its offsets. The Python mirror has the same split as Module 03: a scalar `ToyAlexNet` that
+walks the C's loops in the C's order, and the identical network assembled from vectorized
+`nanograd` layers, pinned to each other by a test.
+
+For CIFAR the vectorized path drops to **float32** — `net.astype(np.float32)` re-stores every
+parameter, and everything downstream follows the dtype of its inputs. The teaching code has run in
+float64 since Module 00 because the agreement tests need it; at CIFAR scale half the bytes is
+roughly half the time, and AlexNet itself trained in single precision. The toy stays in float64.
+
+## The gradient check, and C↔Python agreement
+
+[`tests/test_agreement.py`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/04-alexnet/tests/test_agreement.py)
+holds the three gates every module in this book has.
+
+**Gradients.** The strided, padded convolution is finite-difference checked at three
+stride/padding combinations ($dK$, $db$, $dX$, all near `1e-10`) and pinned to the naive
+definition at `1e-15`; overlapping max-pooling, dropout (with its mask held fixed), local response
+normalization, and the full toy network end-to-end through softmax cross-entropy all match their
+numerical gradients.
+
+**Agreement.** C and Python train the toy for 600 steps — 600 batches of random crops and mirrors,
+600 dropout masks, momentum and weight decay — and print an eight-number fingerprint: final loss,
+train and test accuracy, a checksum of all 890 parameters, four sentinel weights. They agree **to
+every printed digit**. A second line checks the C local response normalization's forward and
+backward against NumPy's, also to every digit. This is the strongest agreement so far, and it is
+not luck: every random number comes from the same stream, every sum runs in the same order, and
+the only floating-point operations that could differ between the two math libraries (`exp`,
+`pow`) happen to round identically here.
+
+**Two Python paths.** The vectorized network and the scalar mirror must compute the same initial
+loss and, after three full training steps with the LCG's crops and masks, the same parameters
+(they agree to `1e-13`).
+
+## Play with it
+
+Dropout is easiest to understand by watching a network memorize and then watching it fail to.
+Below, a wide two-hidden-layer network — over 4,000 weights — trains on just forty points, some
+with deliberately wrong labels (the ringed ones).
+
+<DropoutWidget />
+
+Start with **p = 0** and press Play. Training accuracy reaches 100% within a few hundred steps —
+the network puts every training point on its own side of the boundary, including the mislabeled
+ones, by bending the boundary into narrow fingers and pockets around them. The dashed curve,
+accuracy on 600 fresh points from the same distribution, flattens around 75% and stays there:
+the extra effort went into points that were wrong to begin with, and fresh points that land in
+those pockets pay for it. Now pick **p = 0.5**. The grids at top right show the thinned network
+of each step — half the units gone, a different half every time. A pocket built around one
+mislabeled point needs a specific team of units, and the team is never all present, so the
+network fits it later and less firmly: training accuracy climbs more slowly and stops short of
+100%, and accuracy on fresh points keeps creeping up, ending around 80%. The difference in the
+picture is subtle — the measured gap is not. Then try **p = 0.75**: too much restraint, and test
+accuracy ends below even p = 0's. Dropout is a dial, not a switch.
+
+## Watch it
+
+The chapter in ninety seconds: the 2012 scoreboard, AlexNet's two-GPU architecture and where its
+parameters and arithmetic live, ReLU's unbroken gradient, a network thinning itself at every
+step, one photo becoming many, and the filters our CIFAR network learned.
+
+<figure>
+  <video controls playsinline preload="metadata" width="720" style="max-width:100%;height:auto;border-radius:8px">
+    <source src={`${import.meta.env.BASE_URL}media/04-alexnet.mp4`} type="video/mp4" />
+    Your browser does not support the video tag.
+  </video>
+  <figcaption style="font-size:0.85rem;color:var(--color-muted);margin-top:0.5rem">
+    ImageNet error by year; AlexNet's eight layers split across two GPUs; tanh's vanishing slope
+    against ReLU's, and our ReLU-versus-tanh training curves; dropout silencing random hidden
+    units step after step; random crops and mirrors of one CIFAR photo; and our network's 32
+    first-layer filters — raw, then what training changed.
+  </figcaption>
+</figure>
+
+## Toy → real: mirror glyphs, then CIFAR-10
+
+The toy is built to isolate AlexNet's problem. Each 12×12 color image holds one small corner
+shape — a vertical stroke joined to a horizontal stroke at the **bottom** (class 0) or the **top**
+(class 1) — in a random color, at a random position, over noise. The label is about up versus
+down, so mirroring never changes it. The catch: all 32 training images have their vertical
+stroke on the left, and every test image is **mirrored**. A network that memorizes its training
+set has never seen a test image's shape.
+
+The network is AlexNet in miniature: a 10×10 crop, a 5×5 convolution with stride 2 and padding 2,
+ReLU, 3×3 overlapping max-pooling with stride 2, a 16-unit dense layer with dropout, and a
+two-way output — 890 parameters, trained for 600 steps of SGD with momentum and weight decay. The
+canonical run (the one C and Python agree on) memorizes all 32 training glyphs and classifies
+**92% of the mirrored test glyphs** correctly.
+
+The notebook then asks *which* trick did that, over ten random seeds:
+
+| configuration | train accuracy | mirrored test accuracy |
+|---------------|---------------:|-----------------------:|
+| nothing | 100% | 69% |
+| dropout only | 100% | 68% |
+| crops + mirrors only | 100% | **96%** |
+| crops + mirrors + dropout | 98% | 93% |
+
+Every configuration memorizes the training set. Only the ones that see mirrored crops recognize
+mirrored glyphs — and dropout, on its own, does nothing for them. That is the most useful result
+in this chapter, so it is worth saying plainly: **regularizers are not interchangeable.**
+Augmentation added information the data didn't contain — "a mirrored glyph is the same glyph" —
+and no amount of restraint can conjure information. Dropout's job is different: making a network
+with far more parameters than examples behave as if it had fewer. In this toy the 890 parameters
+are not the problem; the missing mirror images are. In AlexNet, with sixty million parameters
+against a million images, both problems were real.
+
+Then CIFAR-10. Our network keeps AlexNet's silhouette — five convolutions (the first two followed
+by overlapping pooling, three stacked, one more pool), three dense layers with dropout on the two
+hidden ones, ReLU everywhere — sized for 24×24 crops of 32×32 photos, Krizhevsky's own CIFAR
+recipe, and a laptop CPU:
+
+```
+24×24×3 crop
+conv1 32@5×5 pad 2 → ReLU → maxpool 3/2        24 → 11
+conv2 64@3×3 pad 1 → ReLU → maxpool 3/2        11 → 5
+conv3 96@3×3 → conv4 96@3×3 → conv5 64@3×3 → maxpool 3/2     5 → 2
+fc6 256 → dropout → fc7 256 → dropout → fc8 10        348,874 parameters
+```
+
+It trains with one honest departure from 2012. AlexNet used SGD with momentum and a learning rate
+cut by hand over some ninety epochs. On our budget of fifteen, a plain eight-layer network
+without batch normalization (Module 05's subject) learns too slowly under SGD — after ten epochs on
+the same data the notebook measures 44% training error with SGD and momentum against 28% with
+Adam — so the CIFAR network uses Adam (Module 02), with the learning rate cut tenfold twice near
+the end. The toy keeps AlexNet's SGD
+recipe exactly. Everything else is the 2012 recipe: random crops and mirrors, dropout on fc6 and
+fc7, ReLU, float32. The full run — all 50,000 images, fifteen epochs — took about two hours of
+NumPy on a laptop CPU, which is why the notebook caches it:
+
+| epoch | train loss | test accuracy |
+|-------|-----------:|--------------:|
+| 1 | 1.960 | 41.75% |
+| 3 | 1.430 | 57.31% |
+| 5 | 1.231 | 62.08% |
+| 10 | 1.037 | 67.88% |
+| 11 (learning rate ÷ 10) | 0.928 | 71.45% |
+| 13 | 0.885 | 72.54% |
+| 15 (learning rate ÷ 100) | 0.870 | **72.33%** |
+
+The verification gate asserts ≥ 70%, and the run clears it with **72.3%** — 2,767 of 10,000 test
+photos missed. The jump at epoch 11 is the learning-rate cut doing exactly what AlexNet's
+hand-dropped rates did: the noisy steps that were exploring settle into the basin they found.
+AlexNet's ten-crop test-time averaging adds another 3.2 points on top, for **75.5%** — ten looks
+at the same photo, averaged, are better than one.
+
+The notebook reruns the paper's two key experiments on a 10,000-image subset. First, **Figure 1**:
+the same network with no regularization of any kind, ReLU against tanh, SGD with momentum as in
+the paper. **It did not reproduce.** With each activation given the initialization derived for it
+in Module 02 (He for ReLU, Xavier for tanh) and the same learning rate, tanh reached 50% training
+error at epoch 3 and ReLU only at epoch 8 — and a learning-rate sweep in both directions, which
+the paper also did, left tanh ahead. We can't rerun 2012's exact experiment, but the setups
+differ in ways that plausibly matter: theirs was a four-layer network with weights drawn at
+hand-picked fixed scales, ours is eight layers with fan-in-scaled initialization, and the paper
+itself warns that the effect "varies with network architecture". ReLU won the decade anyway, for
+reasons this experiment doesn't probe — it costs a comparison instead of an exponential, which
+mattered on 2012 GPUs, and its gradient is not attenuated by the activations at all, which matters
+more the deeper a network gets. A famous figure is a measurement of a setup, and the setup is part
+of the result.
+
+Second, the regularizers one at a time, tracking clean training accuracy (evaluation mode, center
+crops) against test accuracy over 30 epochs:
+
+| configuration | train accuracy | test accuracy | gap |
+|---------------|---------------:|--------------:|----:|
+| nothing | 100.0% | 56.6% | 43.4 pts |
+| dropout only | 98.9% | 57.2% | 41.7 pts |
+| crops + mirrors only | 74.7% | **66.3%** | 8.4 pts |
+| crops + mirrors + dropout | 68.4% | 62.8% | 5.6 pts |
+
+The toy's lesson, at scale. Unregularized, the network memorizes every one of the 10,000 images
+and its test accuracy stalls at 56.6%; dropout alone barely moves that. Crops and mirrors are the
+big lever: ten points of test accuracy, and the memorization gap collapses from 43 points to 8.
+Adding dropout on top shrinks the gap a little further but *costs* accuracy here — 62.8% against
+66.3%. That is the honest shape of the trade-off: dropout buys generalization with capacity and
+convergence time (the paper notes it "roughly doubles the number of iterations required to
+converge"; at twelve epochs, both dropout runs here were still behind the unregularized one),
+and in our network — whose dense layers hold only 38% of the parameters, against AlexNet's 96% —
+over thirty epochs on 10,000 images, the price isn't worth paying. AlexNet, with sixty million
+parameters almost all in fc6 and fc7, was the opposite case. Our canonical run keeps the 2012
+recipe; whether dropout earns its keep at full scale is exercise 2.
+
+And then it looks inside — and meets a small, honest disappointment. Krizhevsky's Figure 3, the
+most reproduced picture of the network, shows 96 crisp first-layer filters: oriented edges and
+blobs of color. Plot our 32 and they look like colored noise. Nothing is broken; the network just
+hasn't trained long enough for its first layer to forget where it started. Over fifteen epochs on
+50,000 small images, conv1's weights moved only **37%** of the way from their random
+initialization (the deeper layers moved 65–115%), so the random start still dominates the
+picture. Subtract it — plot what training *changed* — and the structure appears: smooth color
+blobs and light-to-dark gradients, with neighboring kernel taps strongly correlated (0.36–0.51)
+where the raw weights are not (≈ 0). AlexNet's crispness was bought with ninety epochs over 1.2
+million images.
+
+<figure>
+  <img
+    src={`${import.meta.env.BASE_URL}media/04-alexnet-filters.png`}
+    alt="The 32 first-layer filters of our CIFAR-10 AlexNet in a 4-by-8 grid, showing what training changed (trained minus initial weights) for each 5×5×3 kernel as a tiny color image: smooth blobs of color and light-to-dark gradients."
+    width="560"
+    style="max-width:100%;height:auto;border-radius:8px"
+  />
+  <figcaption style="font-size:0.85rem;color:var(--color-muted);margin-top:0.5rem">
+    What training changed in conv1 of our CIFAR-10 AlexNet: trained minus initial weights, each
+    filter scaled around mid-gray = 0. Exported by the notebook from the canonical run.
+  </figcaption>
+</figure>
+
+The paper's Figure 4 made a subtler point, and the notebook redoes it: take the last hidden
+layer's activations as an image's *description*, and images with nearby descriptions look alike
+to a person even when their pixels are far apart. Ours, with 256 numbers instead of 4,096, mostly
+agrees: a white horse's nearest neighbors are five horses of every color and pose, a ship's are
+ships (and one airplane, nose-on). Its one car query, a white car with its door open, finds white
+fluffy dogs — and it is worth noticing that this is exactly the kind of confusion the paper's
+far richer description avoided. That 4,096-number vector, it turned out, was useful far beyond
+the thousand ImageNet classes; using it as a general-purpose image representation became, for a
+few years, one of the most common starting points in all of computer vision.
+
+The [notebook](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/04-alexnet/notebook.ipynb)
+closes with the frameworks. PyTorch checks strictly: `F.conv2d(stride=2, padding=2)`,
+`F.max_pool2d(3, 2)` and `F.local_response_norm` receive our exact inputs and gradients in
+float64, and outputs and gradients match ours to `1e-13` or better — with one lesson about reading the
+documentation: PyTorch's LRN divides $\alpha$ by the window size, so matching the paper means
+passing $5\alpha$. The toy network's every parameter gradient matches autograd with our dropout
+mask injected into the torch graph. TensorFlow (a `GradientTape` loop with `tf.image` crops) and
+Keras (`RandomFlip` and `Dropout` as layers that switch themselves off at inference) train the
+same architecture to 70.8% and 68.8%. One framework lesson came free: Keras's own
+`RandomCrop` layer crops a whole batch at one location and *resizes* at inference instead of
+center-cropping — a different augmentation from AlexNet's, so the crops live in the input pipeline
+instead. Reading what a library layer actually does is part of using it.
+
+## What AlexNet actually was
+
+The real network was these mechanisms at full size, plus a few choices that history kept and a
+few it didn't. Every one of them was a reasonable answer to a 2012 constraint.
+
+**Two GPUs, by necessity.** Sixty million parameters and a training batch's activations did not
+fit in one GTX 580's 3 GB. So the network was cut in half lengthwise: each GPU held half the
+kernels of every layer, and the halves talked only at conv3 and at the dense layers. The paper
+reported the split *helped* slightly over a single-GPU network with half the kernels — and found
+something stranger in the filters: on every run, conv1's half on GPU 1 learned mostly
+color-agnostic edges and the half on GPU 2 mostly color blobs. The architecture's wiring decided
+what each half could specialize in. The split survives as **grouped convolution**, the direct
+descendant of LeNet-5's connection table from Module 03 and the ancestor of the depthwise
+convolutions in today's mobile networks.
+
+**Local response normalization.** After the first two convolutions, every activation was divided
+by a power of the energy of its neighbors across channels at the same pixel:
+
+$$
+b_c = a_c \Big/ \Big(k + \alpha \!\!\sum_{j=\max(0,\,c-n/2)}^{\min(N-1,\,c+n/2)}\!\! a_j^2\Big)^{\beta},
+\qquad k = 2,\ n = 5,\ \alpha = 10^{-4},\ \beta = 0.75 ,
+$$
+
+modeled on *lateral inhibition* in real neurons — a strongly firing cell suppresses its
+neighbors. The paper credited it with 1.2–1.4 points of error. Two years later VGG found it bought
+nothing, and batch normalization (Module 05) replaced it entirely. We implement it in both
+languages anyway — its backward pass, where every output depends on five inputs, is a good warm-up
+for batch normalization's. And the notebook's ablation, at our small scale, does *not* side with
+VGG: over twelve epochs on 10,000 images, adding LRN after conv1 and conv2 lifted test accuracy
+from 51.4% to 53.7%. One seed on a small budget is a hint, not a verdict — VGG's comparison was on
+ImageNet with much deeper networks — but it is a useful reminder that "obsolete" in deep learning
+usually means *superseded*, not *useless*. LRN was reaching for something real: keeping
+activation scales in check as signals pass through layers. Batch normalization does that job
+directly, which is why it, and not LRN, is in every network from Module 05 on.
+
+**Initialization and the schedule.** Weights from $\mathcal{N}(0, 0.01^2)$, a fixed standard
+deviation chosen by hand a few years before He initialization (Module 02) derived it from the
+fan-in. Biases set to **1** in conv2, conv4, conv5 and the hidden dense layers, so that ReLUs
+started in their active region. A learning rate of 0.01, divided by ten by hand whenever the
+validation error stopped improving — three times in total — over roughly ninety epochs.
+
+**Ensembles and extra data.** The 15.3% that won was not one network. A single AlexNet scored
+18.2% top-5 error on the validation set; averaging five of them gave 16.4%, and the winning entry
+averaged seven, two of which had first been pre-trained on the larger 15-million-image Fall 2011
+release of ImageNet. Even the single network beat the field by eight points; the ensemble is what
+made the margin ten.
+
+The pattern from Module 03 holds: AlexNet's dead ends were hand-tuned special cases that later
+work replaced with general rules. The fixed $0.01$ became He initialization. The hand-dropped
+learning rate became schedules and adaptive optimizers. LRN became batch normalization. The GPU
+split became a design choice instead of a memory constraint. What did not get replaced — ReLU,
+dropout, augmentation, depth trained end to end on big data with GPUs — is the part every chapter
+from here on inherits.
+
+## What it couldn't do
+
+AlexNet's lesson was taken as *deeper is better*, and the field tested it immediately. A refinement
+of AlexNet by Matthew Zeiler (with Rob Fergus) won the 2013 challenge; by 2014 Oxford's
+VGG network replaced AlexNet's large first kernels with stacks of 3×3 convolutions — two 3×3
+layers see a 5×5 region with fewer weights and one more nonlinearity — and went to **nineteen**
+layers, roughly halving AlexNet's error. Google's entry that year went deeper still.
+
+Then depth stopped working. Push a plain convolutional network past about twenty layers and its
+accuracy *falls* — and not on the test set only, which would be overfitting, but on the
+**training** set. A deeper network can always represent a shallower one (let the extra layers
+compute the identity), so a deeper network that fits its own training data *worse* is not a
+capacity problem or a regularization problem. It is an optimization problem: gradient descent
+cannot find the solution that provably exists. ReLU had made gradients survive eight layers; at
+thirty they were again getting lost on the way down.
+
+The fix, in 2015, was a single line of arithmetic — add each block's input to its output — and it
+let networks train at 152 layers. That is the next chapter.
+
+## Exercises & what's next
+
+1. **The 224 typo.** Using the output-size formula, find every input size between 220 and 230 for
+   which AlexNet's conv1 produces an integer-sized 55×55 map with no padding. Then find a padding
+   that makes 224 work.
+2. **Is dropout worth it at full scale?** On the 10,000-image subset, dropout on top of crops and
+   mirrors cost accuracy. Retrain the canonical run without it (`run_cifar(dropout=0.0,
+   cache=True)` — about two hours) and compare with 72.3%. Then try the opposite: dropout after
+   every conv ReLU too, p = 0.25. Explain both results in terms of where this network's
+   parameters are.
+3. **Count the thinned networks.** With dropout on fc6 and fc7 (256 units each), how many distinct
+   thinned networks share our CIFAR network's weights? Estimate how many of them a full training
+   run actually visits — and explain why the full network at test time still works.
+4. **Without the mirror.** Retrain the toy with crops but no flips (`random_crop_flip(...,
+   flip=False)`). Which part of the mirrored-test gain came from the flips, which from the crops?
+5. **Ten crops versus one.** Measure CIFAR test accuracy with the center crop, the ten-crop
+   average, and the ten crops' *majority vote*. Why does averaging probabilities beat voting?
+6. **PCA color augmentation.** The notebook computes the RGB principal components; add the
+   paper's color jitter to `random_crop_flip`'s output during training and measure the effect.
+
+Then go into the code: the self-verifying
+[`notebook.ipynb`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/04-alexnet/notebook.ipynb)
+rebuilds every result above and cross-checks against PyTorch, TensorFlow and Keras, while
+[`assignment.ipynb`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/04-alexnet/assignment.ipynb)
+hands you four load-bearing pieces — the strided, padded convolution, overlapping pooling's
+gradient routing (and its `np.add.at` trap), inverted dropout, and crops with mirrors — to
+implement yourself, graded against finite differences and the canonical library, and finally
+dropped into a harness that must reproduce the toy's 92% on mirrored glyphs. All of it lives in
+[`topics/04-alexnet/`](https://github.com/shaia/deep-learning-from-scratch/tree/main/topics/04-alexnet).
+
+The network can see photographs now, and it can be big without memorizing. What it cannot be is
+*deep*: past a couple of dozen layers, plain networks stop learning even their training data.
+The answer was found at Microsoft Research in 2015, and it is almost embarrassingly simple — let
+every block pass its input straight through, and learn only what to add.
+
+---
+
+*Next: ResNet — why depth stopped working, and the shortcut that fixed it.*

@@ -1,0 +1,155 @@
+---
+// Module 04's interactive: a wide network memorizing a small, noisy dataset --
+// and dropout stopping it. Train with a chosen drop probability and watch the
+// decision boundary, this step's thinned network, and the gap between
+// training accuracy and accuracy on fresh points. Embed in MDX with:
+//   import DropoutWidget from '../../components/viz/DropoutWidget.astro'
+import WidgetFrame from './WidgetFrame.astro';
+---
+
+<WidgetFrame
+  title="Dropout versus memorization"
+  caption="A 2→64→64→2 network has over 4,000 weights and only 40 training points, some with the wrong label (ringed). Pick p = 0 and press Play: training accuracy hits 100% as the boundary twists around every point, mislabeled ones included, while accuracy on fresh points stalls near 75%. Now pick p = 0.5: each step silences half the hidden units at random (top right), the boundary bends a little less, training accuracy stops short of 100% — and accuracy on fresh points ends about five points higher. Try p = 0.75 to see too much of a good thing."
+  alt="Left: a 2D plane with two interleaved half-moon classes of training points, some ringed as mislabeled, over shaded decision regions that change as the network trains. Right, top: two 8-by-8 grids of hidden units, filled when kept and hollow when dropped in the latest step. Right, bottom: two accuracy curves over training steps, solid for training points and dashed for fresh test points."
+>
+  <div class="panels">
+    <div class="panel">
+      <div class="panel__label">input plane — shaded by the full network's prediction</div>
+      <canvas id="drop-plane" width="400" height="360" style="max-width:100%;height:auto"></canvas>
+    </div>
+    <div class="panel">
+      <div class="panel__label">thinned network · accuracy</div>
+      <canvas id="drop-side" width="320" height="360" style="max-width:100%;height:auto"></canvas>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="drop-play" type="button">▶ Play</button>
+    <button id="drop-step" type="button">Step</button>
+    <button id="drop-reset" type="button">Reset</button>
+    <div class="seg" role="group" aria-label="Drop probability p">
+      <span class="seg__label">p =</span>
+      <button type="button" class="seg__btn" data-p="0">0</button>
+      <button type="button" class="seg__btn" data-p="0.25">0.25</button>
+      <button type="button" class="seg__btn is-on" data-p="0.5">0.5</button>
+      <button type="button" class="seg__btn" data-p="0.75">0.75</button>
+    </div>
+  </div>
+
+  <div id="drop-stats" class="stats mono" aria-live="polite"></div>
+</WidgetFrame>
+
+<script>
+  import { mountDropout, type DropoutStats } from './dropoutCore';
+
+  const plane = document.getElementById('drop-plane') as HTMLCanvasElement | null;
+  const side = document.getElementById('drop-side') as HTMLCanvasElement | null;
+  const playBtn = document.getElementById('drop-play') as HTMLButtonElement | null;
+  const stepBtn = document.getElementById('drop-step');
+  const resetBtn = document.getElementById('drop-reset');
+  const stats = document.getElementById('drop-stats');
+  const pBtns = Array.from(document.querySelectorAll<HTMLButtonElement>('.seg__btn[data-p]'));
+
+  if (plane && side) {
+    // Reduced motion: no autoplay; Step advances 10 gradient steps at a time.
+    // (Read here, not from the handles: mountDropout reports stats once
+    // before it returns, so `w` does not exist yet on that first call.)
+    const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const w = mountDropout(plane, side, {
+      onStats(s: DropoutStats) {
+        if (playBtn) {
+          playBtn.textContent = reducedMotion ? 'autoplay off'
+            : s.playing ? '⏸ Pause' : s.done ? 'done' : '▶ Play';
+          playBtn.disabled = s.done || reducedMotion;
+        }
+        if (stats) {
+          const gap = Math.round((s.trainAcc - s.testAcc) * 100);
+          stats.innerHTML =
+            `<span>step ${s.step}</span>` +
+            `<span>train ${Math.round(s.trainAcc * 100)}%</span>` +
+            `<span>test ${Math.round(s.testAcc * 100)}%</span>` +
+            `<span>gap ${gap >= 0 ? gap : 0} pts</span>`;
+        }
+      },
+    });
+
+    playBtn?.addEventListener('click', () => w.toggle());
+    stepBtn?.addEventListener('click', () => w.step());
+    resetBtn?.addEventListener('click', () => w.reset());
+    for (const b of pBtns) {
+      b.addEventListener('click', () => {
+        w.setDrop(Number(b.dataset.p));
+        for (const o of pBtns) o.classList.toggle('is-on', o === b);
+      });
+    }
+  }
+</script>
+
+<style>
+  .panels {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 0.75rem;
+    width: 100%;
+    justify-items: center;
+  }
+  .panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+    min-width: 0;
+  }
+  .panel__label {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.75rem;
+    color: var(--color-muted);
+  }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    justify-content: center;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.85rem;
+  }
+  .controls button {
+    padding: 0.35rem 0.9rem;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-bg);
+    color: var(--color-text);
+    cursor: pointer;
+  }
+  .controls button:hover {
+    border-color: var(--viz-accent);
+    color: var(--viz-accent);
+  }
+  .controls button:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .seg { display: inline-flex; align-items: center; }
+  .seg__label { color: var(--color-muted); margin-right: 0.4rem; }
+  .seg__btn { border-radius: 0 !important; }
+  .seg__btn + .seg__btn { border-left: none !important; }
+  .seg__btn:first-of-type { border-radius: 6px 0 0 6px !important; }
+  .seg__btn:last-of-type { border-radius: 0 6px 6px 0 !important; }
+  .seg__btn.is-on {
+    background: var(--viz-accent) !important;
+    color: #fff !important;
+    border-color: var(--viz-accent) !important;
+  }
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: center;
+    font-size: 0.85rem;
+    color: var(--color-muted);
+  }
+  .mono {
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  }
+</style>

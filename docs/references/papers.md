@@ -47,7 +47,27 @@ prehistory that leads into it. One-line summaries capture *why the paper mattere
   - LeCun et al. (1989), *Backpropagation Applied to Handwritten Zip Code Recognition* —
     backprop meets weight sharing; the first trained-end-to-end, deployed CNN.
 - **04 AlexNet** — Krizhevsky, Sutskever & Hinton (2012), *ImageNet Classification with Deep
-  Convolutional Neural Networks* — the result that started the modern era.
+  Convolutional Neural Networks*, NIPS 25 — the result that started the modern era: ReLU,
+  dropout, crop/flip augmentation, overlapping pooling, LRN, two GPUs; 15.3% top-5 on
+  ILSVRC-2012 against 26.2% for the next team. Reprinted in *Communications of the ACM* 60(6),
+  2017. [doi:10.1145/3065386](https://doi.org/10.1145/3065386)
+  - Deng, Dong, Socher, Li, Li & Fei-Fei (2009), *ImageNet: A Large-Scale Hierarchical Image
+    Database*, CVPR — the dataset that made scale possible.
+  - Russakovsky et al. (2015), *ImageNet Large Scale Visual Recognition Challenge*, IJCV — the
+    competition's own history and numbers. [arXiv:1409.0575](https://arxiv.org/abs/1409.0575)
+  - Nair & Hinton (2010), *Rectified Linear Units Improve Restricted Boltzmann Machines*, ICML
+    — the ReLU AlexNet adopted.
+  - Hinton, Srivastava, Krizhevsky, Sutskever & Salakhutdinov (2012), *Improving Neural Networks
+    by Preventing Co-adaptation of Feature Detectors* — dropout's first appearance.
+    [arXiv:1207.0580](https://arxiv.org/abs/1207.0580)
+  - Krizhevsky (2009), *Learning Multiple Layers of Features from Tiny Images*, U. Toronto tech
+    report — the source of CIFAR-10, this module's real dataset.
+  - Cireșan, Meier, Masci & Schmidhuber (2012), *Multi-Column Deep Neural Network for Traffic
+    Sign Classification*, Neural Networks — GPU-trained CNNs beating humans (IJCNN 2011) a
+    year before AlexNet.
+  - Simonyan & Zisserman (2014), *Very Deep Convolutional Networks for Large-Scale Image
+    Recognition* (VGG) — deeper, all-3×3, and the finding that LRN does not help.
+    [arXiv:1409.1556](https://arxiv.org/abs/1409.1556)
 - **05 ResNet** — He et al. (2015), *Deep Residual Learning for Image Recognition* — residual
   connections make very deep nets trainable.
   - Ioffe & Szegedy (2015), *Batch Normalization*.

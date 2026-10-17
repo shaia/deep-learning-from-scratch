@@ -104,3 +104,32 @@ void ng_softmax_ce_backward(const double *P, const int *y,
             dlogits[i * k + c] = (P[i * k + c] - (c == y[i] ? 1.0 : 0.0))
                                  / (double)m;
 }
+
+/* ---- Dropout (Module 04), inverted -------------------------------------- */
+/* Each unit survives with probability keep = 1-p, decided by one uniform
+ * draw per entry, in order (the same stream lib/python/nanograd's Dropout
+ * draws when handed an Rng). Survivors are scaled by 1/keep so the expected
+ * activation is unchanged and evaluation needs no dropout code at all.
+ * p == 0 is the identity and draws nothing -- exactly like the Python layer,
+ * so a shared stream stays aligned across the two. */
+void ng_dropout_forward(const double *X, double *Y, double *mask, int n,
+                        double p, NgRng *r) {
+    if (p == 0.0) {
+        for (int j = 0; j < n; j++) {
+            mask[j] = 1.0;
+            Y[j] = X[j];
+        }
+        return;
+    }
+    const double keep = 1.0 - p;
+    for (int j = 0; j < n; j++) {
+        mask[j] = (ng_rng_uniform(r) < keep) ? 1.0 / keep : 0.0;
+        Y[j] = X[j] * mask[j];
+    }
+}
+
+/* A dropped unit sent nothing forward, so it gets nothing back: dX = dY*mask. */
+void ng_dropout_backward(const double *mask, const double *dY, double *dX,
+                         int n) {
+    for (int j = 0; j < n; j++) dX[j] = dY[j] * mask[j];
+}

@@ -11,6 +11,8 @@ venv/
 .mypy_cache/
 .pytest_cache/
 .ipynb_checkpoints/
+.coverage
+.early.coverage/
 
 # ── C / build ──
 build/
@@ -32,6 +34,7 @@ data/**/cifar*/
 # ── OS / editor ──
 .DS_Store
 Thumbs.db
+.vscode/
 
 # ── Claude Code (local assistant config, kept out of the repo) ──
 .claude/
