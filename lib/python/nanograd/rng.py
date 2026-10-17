@@ -10,9 +10,17 @@ languages. `numpy.random` is used for the metric-checked (non-bit-exact) paths.
 `normal()` is Box-Muller on top of the uniform stream, with a one-value spare
 cache -- implemented identically in rng.c -- so Gaussian weight initialization
 (Xavier/He) is bit-exact across C and Python too.
+
+`random(shape)` (Module 04) fills an array with uniforms in row-major order and
+has the same signature as numpy.random.Generator.random -- so anything that
+draws randomness through `rng.random(...)` (Dropout's masks, the augmentation
+crops and flips) accepts either a fast NumPy generator or this LCG, and with
+the LCG it draws exactly the numbers the C mirror draws.
 """
 
 import math
+
+import numpy as np
 
 _MASK64 = (1 << 64) - 1
 
@@ -62,3 +70,17 @@ class Rng:
         self.spare = r * math.sin(2.0 * math.pi * u2)
         self.has_spare = True
         return r * math.cos(2.0 * math.pi * u2)
+
+    def random(self, size):
+        """Array of uniform [0, 1) draws, filled in row-major order.
+
+        Duck-types numpy.random.Generator.random(size), so a layer written
+        against a NumPy generator runs bit-exact against C when handed this
+        LCG instead. A scalar loop -- meant for the toy-sized agreement paths,
+        not for CIFAR-sized tensors (pass a NumPy generator there).
+        """
+        out = np.empty(size, dtype=np.float64)
+        flat = out.reshape(-1)          # view, so this writes `out` in place
+        for j in range(flat.size):
+            flat[j] = self.uniform()
+        return out
