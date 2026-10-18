@@ -11,7 +11,7 @@ void ng_linear_forward(const double *X, const double *W, const double *b,
                        double *Y, int m, int n_in, int n_out) {
     for (int i = 0; i < m; i++)
         for (int o = 0; o < n_out; o++) {
-            double s = b[o];
+            double s = b ? b[o] : 0.0;           /* b NULL: bias-free layer */
             for (int k = 0; k < n_in; k++)
                 s += X[i * n_in + k] * W[k * n_out + o];   /* sum over inputs */
             Y[i * n_out + o] = s;
@@ -31,11 +31,13 @@ void ng_linear_backward(const double *X, const double *W, const double *dY,
                 s += X[i * n_in + k] * dY[i * n_out + o];  /* dL/dW_ko */
             dW[k * n_out + o] = s;
         }
-    for (int o = 0; o < n_out; o++) {
-        double s = 0.0;
-        for (int i = 0; i < m; i++)
-            s += dY[i * n_out + o];                        /* dL/db_o */
-        db[o] = s;
+    if (db) {
+        for (int o = 0; o < n_out; o++) {
+            double s = 0.0;
+            for (int i = 0; i < m; i++)
+                s += dY[i * n_out + o];                    /* dL/db_o */
+            db[o] = s;
+        }
     }
     if (dX) {
         for (int i = 0; i < m; i++)
@@ -132,4 +134,12 @@ void ng_dropout_forward(const double *X, double *Y, double *mask, int n,
 void ng_dropout_backward(const double *mask, const double *dY, double *dX,
                          int n) {
     for (int j = 0; j < n; j++) dX[j] = dY[j] * mask[j];
+}
+
+/* ---- Residual connection (Module 05) ------------------------------------ */
+/* Y = A + B, elementwise. A residual block's forward adds its body's output
+ * to its shortcut; its backward adds the two gradients that reach the forked
+ * input -- the same one line, which is the whole trick. Y may alias A or B. */
+void ng_add(const double *A, const double *B, double *Y, int n) {
+    for (int j = 0; j < n; j++) Y[j] = A[j] + B[j];
 }

@@ -68,9 +68,42 @@ prehistory that leads into it. One-line summaries capture *why the paper mattere
   - Simonyan & Zisserman (2014), *Very Deep Convolutional Networks for Large-Scale Image
     Recognition* (VGG) — deeper, all-3×3, and the finding that LRN does not help.
     [arXiv:1409.1556](https://arxiv.org/abs/1409.1556)
-- **05 ResNet** — He et al. (2015), *Deep Residual Learning for Image Recognition* — residual
-  connections make very deep nets trainable.
-  - Ioffe & Szegedy (2015), *Batch Normalization*.
+- **05 ResNet** — He, Zhang, Ren & Sun (2015), *Deep Residual Learning for Image Recognition*,
+  CVPR 2016 (best paper) — the degradation problem (deeper plain nets fit their own training
+  data worse), and its fix: blocks that learn a residual added to an identity shortcut. 152
+  layers, 3.57% top-5 on ILSVRC 2015, first place in all five ILSVRC/COCO 2015 tracks; by
+  Nature's 2025 count the most-cited paper of the 21st century.
+  [arXiv:1512.03385](https://arxiv.org/abs/1512.03385)
+  - Ioffe & Szegedy (2015), *Batch Normalization: Accelerating Deep Network Training by
+    Reducing Internal Covariate Shift*, ICML — per-channel normalization with a learned scale
+    and shift; 14× fewer steps, 4.9% top-5 (ensemble).
+    [arXiv:1502.03167](https://arxiv.org/abs/1502.03167)
+  - Srivastava, Greff & Schmidhuber (2015), *Highway Networks* (ICML workshop) and *Training
+    Very Deep Networks* (NIPS) — gated shortcuts, inspired by the LSTM, training nets of
+    hundreds of layers seven months before ResNet.
+    [arXiv:1505.00387](https://arxiv.org/abs/1505.00387) ·
+    [arXiv:1507.06228](https://arxiv.org/abs/1507.06228)
+  - Szegedy et al. (2014), *Going Deeper with Convolutions* (GoogLeNet) — 22 layers, the
+    ILSVRC 2014 winner at 6.67%, with auxiliary classifiers to get gradient to its lower
+    layers. [arXiv:1409.4842](https://arxiv.org/abs/1409.4842)
+  - He, Zhang, Ren & Sun (2016), *Identity Mappings in Deep Residual Networks*, ECCV — why a
+    clean identity path matters; pre-activation blocks; a 1001-layer CIFAR network.
+    [arXiv:1603.05027](https://arxiv.org/abs/1603.05027)
+  - Veit, Wilber & Belongie (2016), *Residual Networks Behave Like Ensembles of Relatively
+    Shallow Networks*, NIPS — the unraveled view (2ⁿ paths) and the lesion study: deleting a
+    block barely hurts a ResNet; deleting a layer sends VGG to chance.
+    [arXiv:1605.06431](https://arxiv.org/abs/1605.06431)
+  - Balduzzi et al. (2017), *The Shattered Gradients Problem: If resnets are the answer, then
+    what is the question?*, ICML — in deep plain nets the gradient decorrelates into noise;
+    skip connections keep it structured. [arXiv:1702.08591](https://arxiv.org/abs/1702.08591)
+  - Santurkar, Tsipras, Ilyas & Madry (2018), *How Does Batch Normalization Help
+    Optimization?*, NeurIPS — not internal covariate shift: a smoother loss landscape.
+    [arXiv:1805.11604](https://arxiv.org/abs/1805.11604)
+  - Yang, Pennington, Rao, Sohl-Dickstein & Schoenholz (2019), *A Mean Field Theory of Batch
+    Normalization*, ICLR — batch norm itself makes gradients explode with depth in nets
+    without skip connections. [arXiv:1902.08129](https://arxiv.org/abs/1902.08129)
+  - Hochreiter & Schmidhuber (1997), *Long Short-Term Memory* — the constant error carousel:
+    an identity path through time, eighteen years before it ran through depth (Module 07).
 
 ## Era 2 — Sequences
 

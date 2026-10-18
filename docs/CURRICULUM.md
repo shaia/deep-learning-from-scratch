@@ -15,7 +15,7 @@ agreement/gradient test · post builds · animation renders.
 | 02 | Making deep nets trainable (init/opt/reg) | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
 | 03 | Convolutions / LeNet-5 | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
 | 04 | AlexNet | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
-| 05 | ResNet | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
+| 05 | ResNet | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
 | 06 | RNN | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 | 07 | LSTM | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 | 08 | RNN Regularization | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
@@ -65,8 +65,12 @@ Anim: dropout masking; augmentation pipeline; first-layer filters.
 `lib/*/nanograd`.*
 
 **05 ResNet** — *Let gradients skip — train hundreds of layers.*
-Mechanism: residual blocks, BatchNorm, degradation problem. Real: CIFAR-10.
-Anim: identity shortcut; gradient magnitude with vs without skips.
+Mechanism: residual blocks, BatchNorm, degradation problem. Toy: "deep spirals" (a 34-layer MLP
+that cannot fit 128 spiral points, and its residual twin from the same weights that fits them
+all). Real: CIFAR-10 (the paper's ResNet-20, target ≥ 80%; Figure 6 redone at 20 vs 56 layers;
+a lesion study). Anim: identity shortcut; gradient magnitude with vs without skips.
+*Adds BatchNorm, residual blocks, the zero-padding shortcut, global average pooling and
+bias-free layers to `lib/*/nanograd`.*
 
 ### Era 2 — Sequences (1986–2015)
 
