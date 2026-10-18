@@ -21,6 +21,8 @@ What each module added:
     03  Conv2D, MaxPool2D, AvgPool2D, Flatten, im2col/col2im, conv inits
     04  conv stride/padding, overlapping max-pool, Dropout (+ train()/eval()),
         LocalResponseNorm, crop/flip augmentation, Rng.random
+    05  BatchNorm (+ running statistics, buffers()), Residual blocks,
+        ZeroPadShortcut, GlobalAvgPool2D, bias-free Linear/Conv2D
 """
 
 from .augment import center_crop, random_crop_flip, ten_crop
@@ -28,7 +30,9 @@ from .conv import (
     AvgPool2D,
     Conv2D,
     Flatten,
+    GlobalAvgPool2D,
     MaxPool2D,
+    ZeroPadShortcut,
     col2im,
     conv_out_size,
     im2col,
@@ -49,8 +53,9 @@ from .layers import (
     Tanh,
 )
 from .net import Sequential, mlp
-from .norm import LocalResponseNorm
+from .norm import BatchNorm, LocalResponseNorm
 from .optim import SGD, Adam, RMSProp
+from .residual import Residual
 from .rng import Rng
 
 __all__ = [
@@ -59,6 +64,7 @@ __all__ = [
     "Conv2D", "MaxPool2D", "AvgPool2D", "Flatten", "im2col", "col2im",
     "conv_out_size",
     "LocalResponseNorm",
+    "BatchNorm", "Residual", "ZeroPadShortcut", "GlobalAvgPool2D",
     "random_crop_flip", "center_crop", "ten_crop",
     "Sequential", "mlp",
     "SGD", "RMSProp", "Adam",

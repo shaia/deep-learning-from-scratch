@@ -43,7 +43,7 @@ void ng_conv2d_forward_strided(const double *X, const double *K, const double *b
         for (int f = 0; f < F; f++)
             for (int u = 0; u < OH; u++)
                 for (int v = 0; v < OW; v++) {
-                    double acc = b[f];
+                    double acc = b ? b[f] : 0.0;     /* b NULL: bias-free */
                     for (int c = 0; c < C; c++)
                         for (int p = 0; p < KH; p++)
                             for (int q = 0; q < KW; q++) {
@@ -71,7 +71,8 @@ void ng_conv2d_backward_strided(const double *X, const double *K, const double *
                                 int n, int C, int H, int W, int F, int KH, int KW,
                                 int S, int pad) {
     for (int j = 0; j < F * C * KH * KW; j++) dK[j] = 0.0;
-    for (int f = 0; f < F; f++) db[f] = 0.0;
+    if (db)
+        for (int f = 0; f < F; f++) db[f] = 0.0;
     if (dX)
         for (int j = 0; j < n * C * H * W; j++) dX[j] = 0.0;
     /* No valid kernel position (see forward): every gradient is zero. */
@@ -84,7 +85,7 @@ void ng_conv2d_backward_strided(const double *X, const double *K, const double *
                 for (int v = 0; v < OW; v++) {
                     double g = dY[((i * F + f) * OH + u) * OW + v];
                     if (g == 0.0) continue;   /* ReLU/pool leave most cells dead */
-                    db[f] += g;
+                    if (db) db[f] += g;
                     for (int c = 0; c < C; c++)
                         for (int p = 0; p < KH; p++)
                             for (int q = 0; q < KW; q++) {
@@ -221,5 +222,62 @@ void ng_init_conv2d(double *K, double *b, int F, int C, int KH, int KW,
                                           : sqrt(1.0 / (double)fan_in);
         for (int j = 0; j < total; j++) K[j] = std * ng_rng_normal(r);
     }
-    for (int f = 0; f < F; f++) b[f] = 0.0;
+    if (b)
+        for (int f = 0; f < F; f++) b[f] = 0.0;
+}
+
+/* ---- Module 05: what a residual CNN adds around its convs ---------------- */
+
+/* Option-(A) shortcut (see lib/python/nanograd/conv.py's ZeroPadShortcut):
+ * X:[n,C,H,W] -> Y:[n,F,OH,OW] with OH = (H-1)/S + 1 (every S-th pixel) and
+ * the C input channels placed at offset lo = (F-C)/2 among F >= C output
+ * channels; the rest are zero planes. Parameter-free: still a straight path. */
+void ng_shortcut_pad_forward(const double *X, double *Y,
+                             int n, int C, int H, int W, int F, int S) {
+    const int OH = (H - 1) / S + 1, OW = (W - 1) / S + 1, lo = (F - C) / 2;
+    for (int j = 0; j < n * F * OH * OW; j++) Y[j] = 0.0;
+    for (int i = 0; i < n; i++)
+        for (int c = 0; c < C; c++)
+            for (int u = 0; u < OH; u++)
+                for (int v = 0; v < OW; v++)
+                    Y[((i * F + (lo + c)) * OH + u) * OW + v] =
+                        X[((i * C + c) * H + u * S) * W + v * S];
+}
+
+/* The same selection in reverse: kept pixels get their gradient back, the
+ * skipped pixels and the zero planes (which were not inputs) get nothing. */
+void ng_shortcut_pad_backward(const double *dY, double *dX,
+                              int n, int C, int H, int W, int F, int S) {
+    const int OH = (H - 1) / S + 1, OW = (W - 1) / S + 1, lo = (F - C) / 2;
+    for (int j = 0; j < n * C * H * W; j++) dX[j] = 0.0;
+    for (int i = 0; i < n; i++)
+        for (int c = 0; c < C; c++)
+            for (int u = 0; u < OH; u++)
+                for (int v = 0; v < OW; v++)
+                    dX[((i * C + c) * H + u * S) * W + v * S] =
+                        dY[((i * F + (lo + c)) * OH + u) * OW + v];
+}
+
+/* Global average pooling: Y[i,c] = mean of channel c's H*W map -- the whole
+ * map to one number, the input of a ResNet's single Linear classifier.
+ * Backward spreads each dY evenly: dX = dY / (H*W) on every cell. */
+void ng_global_avgpool_forward(const double *X, double *Y,
+                               int n, int C, int H, int W) {
+    const int HW = H * W;
+    for (int i = 0; i < n; i++)
+        for (int c = 0; c < C; c++) {
+            double s = 0.0;
+            for (int k = 0; k < HW; k++) s += X[(i * C + c) * HW + k];
+            Y[i * C + c] = s / (double)HW;
+        }
+}
+
+void ng_global_avgpool_backward(const double *dY, double *dX,
+                                int n, int C, int H, int W) {
+    const int HW = H * W;
+    for (int i = 0; i < n; i++)
+        for (int c = 0; c < C; c++) {
+            const double share = dY[i * C + c] / (double)HW;
+            for (int k = 0; k < HW; k++) dX[(i * C + c) * HW + k] = share;
+        }
 }

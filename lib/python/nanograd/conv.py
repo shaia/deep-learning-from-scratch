@@ -32,6 +32,8 @@ Conventions (shared with lib/c/nanograd/conv.c -- see nanograd.h):
   * Gradients are *summed* over the batch; the 1/m lives in the loss layer.
 """
 
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 
 
@@ -55,11 +57,40 @@ def conv_out_size(H, K, stride=1, pad=0):
 # computers are fastest at. col2im is the exact adjoint: it scatters
 # row-gradients back and *sums* where patches overlapped, which is precisely
 # dL/dX (and drops whatever landed on the padding, which is not an input).
+#
+# workers > 1 (Module 05): NumPy runs every copy on a single core, and at
+# CIFAR-ResNet sizes these copies -- not the matrix multiplies -- are most of
+# a training step. But image i's patch rows depend only on image i, so the
+# batch splits into `workers` slices, each built by its own thread (NumPy
+# releases the GIL while it copies). Same matrix, element for element, so
+# every downstream result is bit-identical to workers=1.
 # ---------------------------------------------------------------------------
-def im2col(X, KH, KW, stride=1, pad=0):
+def _batch_slices(n, workers):
+    """Split range(n) into up to `workers` contiguous (start, stop) slices."""
+    edges = np.linspace(0, n, min(workers, n) + 1).astype(int)
+    return list(zip(edges[:-1], edges[1:]))
+
+
+def _parallel(fn, slices):
+    """Run fn(a, b) for every slice on its own thread (a pool per call: no
+    state outlives it)."""
+    with ThreadPoolExecutor(len(slices)) as pool:
+        for f in [pool.submit(fn, a, b) for a, b in slices]:
+            f.result()                                # re-raise any error
+
+
+def im2col(X, KH, KW, stride=1, pad=0, workers=1):
     """(n, C, H, W) -> (n*OH*OW, C*KH*KW); row (i,u,v) holds patch (c,p,q)."""
     n, C, H, W = X.shape
     OH, OW = conv_out_size(H, KH, stride, pad), conv_out_size(W, KW, stride, pad)
+    if workers > 1 and n > 1:
+        out = np.empty((n * OH * OW, C * KH * KW), dtype=X.dtype)
+
+        def work(a, b):
+            out[a * OH * OW:b * OH * OW] = im2col(X[a:b], KH, KW, stride, pad)
+
+        _parallel(work, _batch_slices(n, workers))
+        return out
     if pad:
         X = np.pad(X, ((0, 0), (0, 0), (pad, pad), (pad, pad)))  # zero rings
     # cols[i, c, p, q, u, v] = X[i, c, u*S + p, v*S + q]: one strided slice
@@ -74,10 +105,19 @@ def im2col(X, KH, KW, stride=1, pad=0):
     return cols.transpose(0, 4, 5, 1, 2, 3).reshape(n * OH * OW, C * KH * KW)
 
 
-def col2im(cols, x_shape, KH, KW, stride=1, pad=0):
+def col2im(cols, x_shape, KH, KW, stride=1, pad=0, workers=1):
     """Adjoint of im2col: scatter-ADD patch rows back into image positions."""
     n, C, H, W = x_shape
     OH, OW = conv_out_size(H, KH, stride, pad), conv_out_size(W, KW, stride, pad)
+    if workers > 1 and n > 1:
+        dX = np.empty(x_shape, dtype=cols.dtype)
+
+        def work(a, b):
+            dX[a:b] = col2im(cols[a * OH * OW:b * OH * OW], (b - a, C, H, W),
+                             KH, KW, stride, pad)
+
+        _parallel(work, _batch_slices(n, workers))
+        return dX
     cols6 = cols.reshape(n, OH, OW, C, KH, KW).transpose(0, 3, 4, 5, 1, 2)
     dX = np.zeros((n, C, H + 2 * pad, W + 2 * pad), dtype=cols.dtype)
     for p in range(KH):
@@ -111,18 +151,35 @@ def col2im(cols, x_shape, KH, KW, stride=1, pad=0):
 class Conv2D:
     """input_grad=False skips dL/dX -- for a first layer, whose input is the
     data itself and needs no gradient (the C API's dX = NULL). backward then
-    returns None, and the expensive col2im scatter never runs."""
+    returns None, and the expensive col2im scatter never runs.
+
+    bias=False (Module 05) drops b, for a conv that feeds a BatchNorm: the
+    normalization would subtract any per-channel constant right back out, and
+    BatchNorm's beta is the shift that remains (the C API's b = NULL).
+
+    cache_cols=False (Module 05) keeps only the input between the passes and
+    re-runs im2col in backward. The patch matrix is KH*KW times the size of
+    the input -- for a 56-layer ResNet, gigabytes held from the forward pass
+    to the backward -- so trading one extra copy for that memory is what lets
+    the deep CIFAR nets train on a laptop. Same values, same gradients.
+
+    workers (Module 05) builds im2col/col2im on that many threads -- see
+    im2col. Also bit-identical; it only changes how fast."""
 
     def __init__(self, in_ch: int, out_ch: int, kh: int, kw: int,
-                 stride: int = 1, pad: int = 0, input_grad: bool = True):
+                 stride: int = 1, pad: int = 0, input_grad: bool = True,
+                 bias: bool = True, cache_cols: bool = True, workers: int = 1):
         self.K = np.zeros((out_ch, in_ch, kh, kw))
-        self.b = np.zeros(out_ch)
+        self.b = np.zeros(out_ch) if bias else None
         self.dK = np.zeros_like(self.K)
-        self.db = np.zeros_like(self.b)
+        self.db = np.zeros_like(self.b) if bias else None
         self.stride = stride
         self.pad = pad
         self.input_grad = input_grad
+        self.cache_cols = cache_cols
+        self.workers = workers
         self.cols = None       # cached im2col(X) -- both grads need it
+        self.X = None          # ...or just X, to rebuild it (cache_cols=False)
         self.x_shape = None
 
     def forward(self, X):
@@ -131,9 +188,13 @@ class Conv2D:
         OH = conv_out_size(H, KH, self.stride, self.pad)
         OW = conv_out_size(W, KW, self.stride, self.pad)
         self.x_shape = X.shape
-        self.cols = im2col(X, KH, KW, self.stride, self.pad)  # (n*OH*OW, C*KH*KW)
+        cols = im2col(X, KH, KW, self.stride, self.pad, self.workers)  # (n*OH*OW, C*KH*KW)
+        self.cols, self.X = (cols, None) if self.cache_cols else (None, X)
         Kmat = self.K.reshape(F, C * KH * KW)            # each filter, one row
-        out = self.cols @ Kmat.T + self.b                # ONE matmul = all of it
+        if self.b is None:
+            out = cols @ Kmat.T
+        else:
+            out = cols @ Kmat.T + self.b                 # ONE matmul = all of it
         return out.reshape(n, OH, OW, F).transpose(0, 3, 1, 2)
 
     def backward(self, dY):
@@ -141,24 +202,28 @@ class Conv2D:
         n, _, OH, OW = dY.shape
         # Rows back in (i, u, v) order to line up with the cached patch rows.
         dout = dY.transpose(0, 2, 3, 1).reshape(n * OH * OW, F)
-        self.db = dout.sum(axis=0)
-        self.dK = (dout.T @ self.cols).reshape(F, C, KH, KW)
+        if self.b is not None:
+            self.db = dout.sum(axis=0)
+        cols = (self.cols if self.cache_cols
+                else im2col(self.X, KH, KW, self.stride, self.pad, self.workers))
+        self.dK = (dout.T @ cols).reshape(F, C, KH, KW)
         if not self.input_grad:
             return None
         dcols = dout @ self.K.reshape(F, C * KH * KW)    # grad of each patch
         return col2im(dcols, self.x_shape, KH, KW,       # scatter-add -> dX
-                      self.stride, self.pad)
+                      self.stride, self.pad, self.workers)
 
     def params(self):
-        return [self.K, self.b]
+        return [self.K] if self.b is None else [self.K, self.b]
 
     def grads(self):
-        return [self.dK, self.db]
+        return [self.dK] if self.b is None else [self.dK, self.db]
 
     def astype(self, dtype):
         """Re-store the parameters at another precision (see Sequential.astype)."""
         self.K = self.K.astype(dtype)
-        self.b = self.b.astype(dtype)
+        if self.b is not None:
+            self.b = self.b.astype(dtype)
         return self
 
 
@@ -260,6 +325,69 @@ class Flatten:
 
     def backward(self, dY):
         return dY.reshape(self.x_shape)
+
+    def params(self): return []
+    def grads(self): return []
+
+
+# ---------------------------------------------------------------------------
+# Module 05 (ResNet): the two pieces a residual CNN adds around its convs.
+#
+# GlobalAvgPool2D replaces the big dense head of AlexNet-era networks: each
+# channel's whole feature map is averaged to ONE number, so a (n, C, H, W)
+# map becomes the (n, C) input of a single Linear classifier. No parameters,
+# no fixed input size -- and none of the dense layers that held 96% of
+# AlexNet's weights. Backward spreads each dY evenly over its H*W cells.
+#
+# ZeroPadShortcut is the paper's option (A) for a residual block that halves
+# the resolution and widens the channels: the skip path can't be a plain
+# identity any more (shapes differ), so it keeps every `stride`-th pixel and
+# pads the new channels with zeros -- still parameter-free, still a straight
+# path for the gradient. The input channels land in the middle of the output
+# (equal zero planes on each side, the common CIFAR-ResNet layout). Its
+# backward is the same selection, run in reverse: the zero planes were not
+# inputs, so their gradient is dropped. (Option (B), a 1x1 strided Conv2D,
+# needs nothing new.)
+# ---------------------------------------------------------------------------
+class GlobalAvgPool2D:
+    def __init__(self):
+        self.x_shape = None
+
+    def forward(self, X):
+        self.x_shape = X.shape
+        return X.mean(axis=(2, 3))
+
+    def backward(self, dY):
+        n, C, H, W = self.x_shape
+        return np.broadcast_to((dY / (H * W))[:, :, None, None], (n, C, H, W)).copy()
+
+    def params(self): return []
+    def grads(self): return []
+
+
+class ZeroPadShortcut:
+    """(n, in_ch, H, W) -> (n, out_ch, ceil(H/S), ceil(W/S)): every S-th
+    pixel, channels zero-padded (out_ch - in_ch)//2 on the low side."""
+
+    def __init__(self, in_ch: int, out_ch: int, stride: int = 2):
+        assert out_ch >= in_ch, "the shortcut only widens"
+        self.in_ch, self.out_ch, self.stride = in_ch, out_ch, stride
+        self.lo = (out_ch - in_ch) // 2
+        self.x_shape = None
+
+    def forward(self, X):
+        self.x_shape = X.shape
+        S, lo = self.stride, self.lo
+        sub = X[:, :, ::S, ::S]
+        Y = np.zeros((X.shape[0], self.out_ch) + sub.shape[2:], dtype=X.dtype)
+        Y[:, lo:lo + self.in_ch] = sub
+        return Y
+
+    def backward(self, dY):
+        S, lo = self.stride, self.lo
+        dX = np.zeros(self.x_shape, dtype=dY.dtype)
+        dX[:, :, ::S, ::S] = dY[:, lo:lo + self.in_ch]
+        return dX
 
     def params(self): return []
     def grads(self): return []

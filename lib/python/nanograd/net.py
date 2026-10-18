@@ -40,18 +40,31 @@ class Sequential:
     def grads(self):
         return [g for layer in self.layers for g in layer.grads()]
 
-    # Module 04: some layers (Dropout) behave differently while training than
-    # while being evaluated. These flip every such layer's `training` flag --
-    # call eval() before measuring accuracy, train() before the next epoch.
+    # Module 05: BatchNorm keeps running statistics -- state that is not a
+    # parameter (no gradient, no optimizer) but is part of the trained network
+    # all the same. buffers() collects it, in a stable order, for saving.
+    def buffers(self):
+        return [b for layer in self.layers if hasattr(layer, "buffers")
+                for b in layer.buffers()]
+
+    # Module 04: some layers (Dropout; from Module 05, BatchNorm) behave
+    # differently while training than while being evaluated. These flip every
+    # such layer's `training` flag -- call eval() before measuring accuracy,
+    # train() before the next epoch. Containers (a Residual block, a nested
+    # Sequential) pass the call on to the layers inside them.
     def train(self):
         for layer in self.layers:
-            if hasattr(layer, "training"):
+            if hasattr(layer, "train"):
+                layer.train()
+            elif hasattr(layer, "training"):
                 layer.training = True
         return self
 
     def eval(self):
         for layer in self.layers:
-            if hasattr(layer, "training"):
+            if hasattr(layer, "eval"):
+                layer.eval()
+            elif hasattr(layer, "training"):
                 layer.training = False
         return self
 

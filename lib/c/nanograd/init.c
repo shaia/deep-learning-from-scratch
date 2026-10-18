@@ -20,5 +20,6 @@ void ng_init_linear(double *W, double *b, int n_in, int n_out,
             for (int o = 0; o < n_out; o++)
                 W[i * n_out + o] = std * ng_rng_normal(r);
     }
-    for (int o = 0; o < n_out; o++) b[o] = 0.0;   /* biases start at zero */
+    if (b)                                        /* NULL: a bias-free layer */
+        for (int o = 0; o < n_out; o++) b[o] = 0.0;   /* biases start at zero */
 }
