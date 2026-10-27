@@ -1,0 +1,176 @@
+---
+// Module 06's interactive: how far back can a recurrent net remember? A vanilla
+// tanh RNN learns the echo task live (output the symbol read d steps ago) while
+// you choose the delay d and how far back the training gradient may reach;
+// a gradient-through-time chart shows why the reach is the limit. Embed in MDX with:
+//   import EchoWidget from '../../components/viz/EchoWidget.astro'
+import WidgetFrame from './WidgetFrame.astro';
+---
+
+<WidgetFrame
+  title="How far back it can remember"
+  caption="A small recurrent network reads a stream of random symbols from a four-letter alphabet and must output the symbol it read d steps earlier. Start at d = 4 with the gradient reaching back through all steps (full BPTT) and press Play: within a few hundred updates it reads 100% on fresh test sequences. Now switch the reach to 1 · Elman — Elman's 1990 training, where the gradient never leaves the previous state — and it cannot learn, even at d = 1. Try reach 4 with d = 2 and then d = 4: it learns exactly the delays the gradient reaches, and no more. Finally return to full BPTT and try d = 12 and d = 16, watching the gradient bars (bottom right) at k = d: the signal from the last step shrinks geometrically as it travels back, and the longer the delay, the less of it arrives."
+  alt="Left, top: the tape, three rows of thirty-two symbols for one test sequence; each symbol is a circle, square, triangle or diamond in its own color. The first row is the input, the second the target, which is the input shifted right by d steps with blanks for the first d steps, and the third is the network's prediction, where a wrong prediction is boxed and marked with a cross. An arrow shows an input symbol becoming the target d steps later. Left, bottom: a heatmap of the sixteen hidden units over the same thirty-two steps, green for positive values, orange for negative, blank at zero. Right, top: test accuracy against update count, with a dashed line at the 25 percent chance level, and below it the training loss on a log scale. Right, bottom: a log-scale bar chart of how much gradient from the last step reaches each earlier step, for 0 to 32 steps back; a solid vertical line marks k equals d, and with truncated training a dashed line marks the cut beyond which no bars appear."
+>
+  <div class="panels">
+    <div class="panel">
+      <div class="panel__label">tape · hidden state</div>
+      <canvas id="echo-tape" width="420" height="154" style="max-width:100%;height:auto"></canvas>
+      <canvas id="echo-hidden" width="420" height="170" style="max-width:100%;height:auto"></canvas>
+    </div>
+    <div class="panel">
+      <div class="panel__label">accuracy · loss · gradient through time</div>
+      <canvas id="echo-acc" width="420" height="140" style="max-width:100%;height:auto"></canvas>
+      <canvas id="echo-loss" width="420" height="120" style="max-width:100%;height:auto"></canvas>
+      <canvas id="echo-grad" width="420" height="190" style="max-width:100%;height:auto"></canvas>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="echo-play" type="button">▶ Play</button>
+    <button id="echo-step" type="button">Step</button>
+    <button id="echo-reset" type="button">Reset</button>
+    <div class="seg" role="group" aria-label="Delay d in steps">
+      <span class="seg__label">delay d =</span>
+      <button type="button" class="seg__btn" data-d="1">1</button>
+      <button type="button" class="seg__btn" data-d="2">2</button>
+      <button type="button" class="seg__btn is-on" data-d="4">4</button>
+      <button type="button" class="seg__btn" data-d="8">8</button>
+      <button type="button" class="seg__btn" data-d="12">12</button>
+      <button type="button" class="seg__btn" data-d="16">16</button>
+    </div>
+    <div class="seg" role="group" aria-label="How far back the gradient reaches">
+      <span class="seg__label">gradient reaches back:</span>
+      <button type="button" class="seg__btn" data-k="1">1 · Elman</button>
+      <button type="button" class="seg__btn" data-k="4">4</button>
+      <button type="button" class="seg__btn" data-k="8">8</button>
+      <button type="button" class="seg__btn is-on" data-k="0">all</button>
+    </div>
+  </div>
+
+  <div id="echo-stats" class="stats mono" aria-live="polite"></div>
+</WidgetFrame>
+
+<script>
+  import { mountEcho, MAX_STEPS, type EchoStats } from './echoCore';
+
+  const tape = document.getElementById('echo-tape') as HTMLCanvasElement | null;
+  const hidden = document.getElementById('echo-hidden') as HTMLCanvasElement | null;
+  const acc = document.getElementById('echo-acc') as HTMLCanvasElement | null;
+  const loss = document.getElementById('echo-loss') as HTMLCanvasElement | null;
+  const grad = document.getElementById('echo-grad') as HTMLCanvasElement | null;
+  const playBtn = document.getElementById('echo-play') as HTMLButtonElement | null;
+  const stepBtn = document.getElementById('echo-step');
+  const resetBtn = document.getElementById('echo-reset');
+  const stats = document.getElementById('echo-stats');
+  const dBtns = Array.from(document.querySelectorAll<HTMLButtonElement>('.seg__btn[data-d]'));
+  const kBtns = Array.from(document.querySelectorAll<HTMLButtonElement>('.seg__btn[data-k]'));
+
+  if (tape && hidden && acc && loss && grad) {
+    // Reduced motion: no autoplay; Step advances 25 updates at a time.
+    // (Read here, not from the handles: mountEcho reports stats once before
+    // it returns, so `w` does not exist yet on that first call.)
+    const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const w = mountEcho({ tape, hidden, acc, loss, grad }, {
+      onStats(s: EchoStats) {
+        if (playBtn) {
+          playBtn.textContent = reducedMotion ? 'autoplay off'
+            : s.playing ? '⏸ Pause' : s.done ? 'done' : '▶ Play';
+          playBtn.disabled = s.done || reducedMotion;
+        }
+        if (stats) {
+          stats.innerHTML =
+            `<span>update ${s.step} / ${MAX_STEPS}</span>` +
+            `<span>d = ${s.delay}</span>` +
+            `<span>reach ${s.reach === 0 ? 'all' : s.reach === 1 ? '1 (Elman)' : s.reach}</span>` +
+            `<span>test accuracy ${(s.acc * 100).toFixed(1)}%</span>`;
+        }
+      },
+    });
+
+    playBtn?.addEventListener('click', () => w.toggle());
+    stepBtn?.addEventListener('click', () => w.step());
+    resetBtn?.addEventListener('click', () => w.reset());
+    for (const b of dBtns) {
+      b.addEventListener('click', () => {
+        w.setDelay(Number(b.dataset.d));
+        for (const o of dBtns) o.classList.toggle('is-on', o === b);
+      });
+    }
+    for (const b of kBtns) {
+      b.addEventListener('click', () => {
+        w.setReach(Number(b.dataset.k));
+        for (const o of kBtns) o.classList.toggle('is-on', o === b);
+      });
+    }
+  }
+</script>
+
+<style>
+  .panels {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 0.75rem;
+    width: 100%;
+    justify-items: center;
+  }
+  .panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+    min-width: 0;
+  }
+  .panel__label {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.75rem;
+    color: var(--color-muted);
+  }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    justify-content: center;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.85rem;
+  }
+  .controls button {
+    padding: 0.35rem 0.9rem;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-bg);
+    color: var(--color-text);
+    cursor: pointer;
+  }
+  .controls button:hover {
+    border-color: var(--viz-accent);
+    color: var(--viz-accent);
+  }
+  .controls button:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .seg { display: inline-flex; align-items: center; }
+  .seg__label { color: var(--color-muted); margin-right: 0.4rem; }
+  .seg__btn { border-radius: 0 !important; }
+  .seg__btn + .seg__btn { border-left: none !important; }
+  .seg__btn:first-of-type { border-radius: 6px 0 0 6px !important; }
+  .seg__btn:last-of-type { border-radius: 0 6px 6px 0 !important; }
+  .seg__btn.is-on {
+    background: var(--viz-accent) !important;
+    color: #fff !important;
+    border-color: var(--viz-accent) !important;
+  }
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: center;
+    font-size: 0.85rem;
+    color: var(--color-muted);
+  }
+  .mono {
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  }
+</style>

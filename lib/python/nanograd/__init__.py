@@ -23,6 +23,8 @@ What each module added:
         LocalResponseNorm, crop/flip augmentation, Rng.random
     05  BatchNorm (+ running statistics, buffers()), Residual blocks,
         ZeroPadShortcut, GlobalAvgPool2D, bias-free Linear/Conv2D
+    06  RNN (tanh recurrence, backpropagation through time, h0 carry for
+        truncated BPTT), clip_grad_norm
 """
 
 from .augment import center_crop, random_crop_flip, ten_crop
@@ -54,9 +56,10 @@ from .layers import (
 )
 from .net import Sequential, mlp
 from .norm import BatchNorm, LocalResponseNorm
-from .optim import SGD, Adam, RMSProp
+from .optim import SGD, Adam, RMSProp, clip_grad_norm
 from .residual import Residual
 from .rng import Rng
+from .rnn import RNN
 
 __all__ = [
     "Rng",
@@ -65,9 +68,10 @@ __all__ = [
     "conv_out_size",
     "LocalResponseNorm",
     "BatchNorm", "Residual", "ZeroPadShortcut", "GlobalAvgPool2D",
+    "RNN",
     "random_crop_flip", "center_crop", "ten_crop",
     "Sequential", "mlp",
-    "SGD", "RMSProp", "Adam",
+    "SGD", "RMSProp", "Adam", "clip_grad_norm",
     "xavier_normal", "he_normal", "small_uniform",
     "xavier_normal_conv2d", "he_normal_conv2d",
 ]

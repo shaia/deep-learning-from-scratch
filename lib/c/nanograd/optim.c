@@ -27,6 +27,21 @@ void ng_rmsprop_step(double *p, const double *g, double *s, int n,
     }
 }
 
+/* Gradient-norm clipping (Module 06; Pascanu, Mikolov & Bengio 2013). One
+ * length for the whole gradient, summed in ascending order; if it exceeds
+ * max_norm, rescale every entry by max_norm/||g|| -- same direction, shorter
+ * step. Returns the norm measured before clipping. */
+double ng_clip_grad_norm(double *g, int n, double max_norm) {
+    double s = 0.0;
+    for (int i = 0; i < n; i++) s += g[i] * g[i];
+    const double norm = sqrt(s);
+    if (norm > max_norm) {
+        const double scale = max_norm / norm;
+        for (int i = 0; i < n; i++) g[i] *= scale;
+    }
+    return norm;
+}
+
 /* Adam. b1c = 1-beta1^t and b2c = 1-beta2^t are supplied by the caller (tracked
  * by repeated multiplication) so C and Python never disagree on a pow() ulp. */
 void ng_adam_step(double *p, const double *g, double *m, double *v, int n,

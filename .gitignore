@@ -30,6 +30,7 @@ data/**/*.gz
 data/**/*.idx*
 data/**/*.bin
 data/**/cifar*/
+data/shakespeare/
 
 # ── OS / editor ──
 .DS_Store

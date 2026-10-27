@@ -105,3 +105,29 @@ class Adam:
 
 
 OPTIMIZERS = {"sgd": SGD, "rmsprop": RMSProp, "adam": Adam}
+
+
+def clip_grad_norm(grads, max_norm):
+    """Gradient-norm clipping (Pascanu, Mikolov & Bengio 2013) -- Module 06.
+
+    Treat every gradient as one long vector g. If its length ||g|| exceeds
+    max_norm, rescale it to length max_norm: same direction, shorter step.
+
+        if ||g|| > max_norm:   g <- g * (max_norm / ||g||)
+
+    A recurrent net's gradient occasionally explodes -- the loss surface has
+    near-vertical "cliffs" where a product of many Jacobians grows huge -- and
+    one unclipped step off a cliff can undo all of training. Clipping changes
+    only those rare steps; everywhere else it does nothing. Scales `grads` in
+    place (call it between backward() and the optimizer's step) and returns the
+    norm measured BEFORE clipping, which is worth logging.
+    """
+    total = 0.0
+    for g in grads:
+        total += float((g * g).sum())
+    norm = float(np.sqrt(total))
+    if norm > max_norm:
+        scale = max_norm / norm
+        for g in grads:
+            g *= scale
+    return norm
