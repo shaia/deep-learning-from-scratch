@@ -35,7 +35,7 @@ double ng_rng_normal(NgRng *r);    /* N(0, 1) via Box-Muller */
 
 /* ---------------------------------------------------------------------------
  * Weight initialization. Fills W (n_in x n_out, row-major) in place by drawing
- * from `r` in row-major order; sets b (length n_out) to zero.
+ * from `r` in row-major order; sets b (length n_out) to zero (b may be NULL).
  *   XAVIER: std = sqrt(1/fan_in)  (sigmoid/tanh)
  *   HE:     std = sqrt(2/fan_in)  (ReLU)
  *   SMALL:  uniform [-1, 1)       (the Module-01 baseline, for ablation)
@@ -49,6 +49,8 @@ void ng_init_linear(double *W, double *b, int n_in, int n_out,
  *   X:[m,n_in]  W:[n_in,n_out]  b:[n_out]  ->  Y:[m,n_out]
  * Gradients are SUMMED over the batch (the 1/m is applied at the loss), matching
  * lib/python/nanograd. dX may be NULL for the first layer. Buffers are distinct.
+ * b (and so db) may be NULL: a bias-free layer, as before a BatchNorm, whose
+ * beta does the bias's job (Module 05).
  * ------------------------------------------------------------------------- */
 void ng_linear_forward(const double *X, const double *W, const double *b,
                        double *Y, int m, int n_in, int n_out);
@@ -83,7 +85,8 @@ void   ng_softmax_ce_backward(const double *P, const int *y,
  * flat row-major NCHW, X[((i*C + c)*H + h)*W + w]; kernels are (F,C,KH,KW),
  * K[((f*C + c)*KH + p)*KW + q] (named K -- W already means image width).
  * "conv" is cross-correlation (no kernel flip). Gradients are SUMMED over the
- * batch (the 1/m lives at the loss); dX may be NULL for the first layer.
+ * batch (the 1/m lives at the loss); dX may be NULL for the first layer;
+ * b/db may be NULL for a bias-free conv (Module 05, before a BatchNorm).
  *
  * The _strided forms take a stride S and zero-padding `pad`:
  *   OH = (H + 2*pad - KH)/S + 1,  OW = (W + 2*pad - KW)/S + 1.
@@ -127,7 +130,8 @@ void ng_avgpool2d_backward(const double *dY, double *dX,
                            int n, int C, int H, int W, int P);
 
 /* Kernel init: He/Xavier with conv fan-in = C*KH*KW (SMALL kept for ablation).
- * Fills K flat in row-major (F,C,KH,KW) order from `r`; zeroes b (length F). */
+ * Fills K flat in row-major (F,C,KH,KW) order from `r`; zeroes b (length F;
+ * may be NULL). */
 void ng_init_conv2d(double *K, double *b, int F, int C, int KH, int KW,
                     NgRng *r, NgInit kind);
 
@@ -166,6 +170,46 @@ void ng_random_crop_flip(const double *X, double *out,
                          NgRng *r);
 void ng_center_crop(const double *X, double *out,
                     int n, int C, int H, int W, int crop);
+
+/* ---------------------------------------------------------------------------
+ * Residual networks (Module 05, ResNet).
+ *
+ * Batch normalization, per channel c over its m = n*HW values, with layout
+ * X[(i*C + c)*HW + k] -- HW = 1 after a Linear, H*W after a conv:
+ *   xhat = (x - mean) * invstd,  invstd = 1/sqrt(var + eps),  y = gamma*xhat + beta.
+ * training != 0 uses the batch's mean and (biased) variance and updates the
+ * running averages, run = (1-momentum)*run + momentum*batch (variance
+ * unbiased, *m/(m-1)); training == 0 normalizes with the running statistics
+ * and leaves them alone. XHAT ([n,C,HW]) and invstd ([C]) are cached for
+ * backward, which writes dgamma = sum dY*xhat, dbeta = sum dY and
+ *   training:   dX = (gamma*invstd/m) * (m*dY - dbeta - xhat*dgamma)
+ *   evaluation: dX = dY * gamma * invstd          (dX may be NULL).
+ *
+ * ng_add: Y = A + B -- the residual connection forward (body + shortcut) and,
+ * at the forked input, its backward (the two gradients summed).
+ *
+ * Option-(A) shortcut for a block that downsamples by S and widens C -> F:
+ * every S-th pixel, OH = (H-1)/S + 1, input channels at offset (F-C)/2, zero
+ * planes elsewhere. Global average pooling: Y[i,c] = mean over H*W.
+ * ------------------------------------------------------------------------- */
+void ng_batchnorm_forward(const double *X, const double *gamma, const double *beta,
+                          double *Y, double *XHAT, double *invstd,
+                          double *run_mean, double *run_var,
+                          int n, int C, int HW, double eps, double momentum,
+                          int training);
+void ng_batchnorm_backward(const double *XHAT, const double *gamma,
+                           const double *invstd, const double *dY,
+                           double *dX, double *dgamma, double *dbeta,
+                           int n, int C, int HW, int training);
+void ng_add(const double *A, const double *B, double *Y, int n);
+void ng_shortcut_pad_forward(const double *X, double *Y,
+                             int n, int C, int H, int W, int F, int S);
+void ng_shortcut_pad_backward(const double *dY, double *dX,
+                              int n, int C, int H, int W, int F, int S);
+void ng_global_avgpool_forward(const double *X, double *Y,
+                               int n, int C, int H, int W);
+void ng_global_avgpool_backward(const double *dY, double *dX,
+                                int n, int C, int H, int W);
 
 /* ---------------------------------------------------------------------------
  * Optimizers, over a flat parameter array of length n. State buffers (velocity

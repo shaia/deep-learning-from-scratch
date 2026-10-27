@@ -52,6 +52,23 @@ $H_{\text{out}} = \lfloor (H + 2P_{\text{pad}} - K)/S \rfloor + 1$ — `conv_out
 | $\lambda$ | `weight_decay` | L2 weight-decay coefficient |
 | $\mu$ | `momentum` | SGD momentum |
 
+### Residual networks & batch normalization (from Module 05)
+
+| Symbol | Code name | Meaning |
+|--------|-----------|---------|
+| $x_\ell$ | — | input to residual block $\ell$ |
+| $\mathcal{F}(x)$ | `body` | a block's residual function (its layers); calligraphic, because $F$ already counts filters |
+| $y = \mathrm{relu}(\mathcal{F}(x) + x)$ | `Residual` | the basic block; the $+ x$ is the shortcut (identity, or option (A) zero-padding when shapes change) |
+| $n$ | `n` | blocks per stage in the CIFAR ResNets: depth $6n + 2$ (ResNet-20, -56 are $n = 3, 9$) |
+| $\mu_c$, $\sigma_c^2$ | `mu`, `var` | batch mean and (biased) variance of channel $c$, over its $m$ values in a batch |
+| $\hat{x}$ | `xhat` | normalized activation, $(x - \mu_c)/\sqrt{\sigma_c^2 + \epsilon}$ |
+| $\gamma_c$, $\beta_c$ | `gamma`, `beta` | BatchNorm's learned scale and shift |
+| $\epsilon$ | `eps` | BatchNorm's variance floor ($10^{-5}$) |
+| — | `running_mean`, `running_var` | BatchNorm's evaluation-mode statistics (exponential averages, momentum $0.1$) |
+
+In BatchNorm, $m$ is the number of values each channel's statistics run over: the batch
+size after a Linear, batch size $\times H \times W$ after a convolution.
+
 ## Conventions
 
 - **Vectors** lowercase ($x$, $w$); **matrices** uppercase ($X$, $W$). In code, `W` for a

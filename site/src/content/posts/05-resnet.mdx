@@ -1,0 +1,678 @@
+---
+title: ResNet
+moduleNumber: 5
+description: Why deeper stopped being better — and the one-line fix that let networks go to 152 layers. We trace the race to depth from AlexNet to VGG and GoogLeNet, reproduce the degradation problem on a 34-layer toy that cannot fit two spirals, measure why (gradients that explode, training that turns chaotic, gradients that shatter into noise), derive the residual block and batch normalization by hand, train the paper's CIFAR-10 ResNets, and delete blocks from a trained network to see what it really is — from scratch in C and NumPy.
+draft: false
+---
+
+import ResidualWidget from '../../components/viz/ResidualWidget.astro';
+
+## A hundred and fifty-two layers
+
+On December 10, 2015, four researchers at Microsoft Research Asia in Beijing — Kaiming He,
+Xiangyu Zhang, Shaoqing Ren and Jian Sun — posted a twelve-page technical report to arXiv. Their
+team had just won the ImageNet challenge, the competition AlexNet had upended three years
+earlier, with an ensemble of networks that missed on **3.57%** of test images, five guesses
+allowed. AlexNet's winning error had been 15.3%; the trained human annotator measured on the
+same task, 5.1%. They had also won ImageNet's object-detection and localization tracks and both
+tracks of Microsoft's new COCO challenge — every main event they entered — mostly with the same
+networks underneath. The deepest of them had **152 layers**. AlexNet had eight; the year
+before, nineteen had been considered very deep.
+
+The report, *Deep Residual Learning for Image Recognition*, won the best-paper award at CVPR
+the following summer, and in 2025, when *Nature* counted citations across the five big
+databases, it came out as the most-cited scientific paper of the twenty-first century. The
+idea in it is almost embarrassingly small. A block of layers normally computes a function of
+its input; a **residual** block computes a function of its input and *adds the input back*.
+One addition per block. With it, networks of any depth train.
+
+But the most important figure in the paper is not the 152-layer result. It is the first one:
+two training curves on CIFAR-10, the small-image dataset of Module 04, for a 20-layer and a
+56-layer network of the plain, AlexNet-descended kind. The deeper network's error is higher —
+on the test set, and also, which is the strange part, on the **training set**. A network with
+more layers was fitting its own training data worse. That figure is the *degradation problem*,
+and this chapter is about it: why it happens, why the obvious explanations are wrong, and why
+one `+` fixes it. Along the way it introduces **batch normalization**, the other half of every
+modern deep network, and ends with a surprise about what a residual network actually is.
+
+## Deeper, and then not
+
+Module 04 ended with the lesson the field drew from AlexNet: deeper is better. The next three
+years were a race to act on it.
+
+The 2013 ImageNet challenge went to an AlexNet refined by Matthew Zeiler and Rob Fergus, who
+had built tools to visualize what each layer responded to and tuned the network by looking —
+still eight layers, 11.7% error. In 2014 two entries pushed depth for real. Karen Simonyan and
+Andrew Zisserman at Oxford's Visual Geometry Group built **VGG**: nothing but 3×3
+convolutions, stacked 16 or 19 layers deep (two 3×3 layers see the same 5×5 region as one 5×5
+layer, with fewer weights and an extra nonlinearity). It came second in classification at
+7.3%. First, at 6.7%, was Google's **GoogLeNet**, 22 layers of branching "Inception" modules.
+
+Both teams had to fight to train what they built, and the fixes are telling. VGG's deepest
+networks would not train from random weights, so Simonyan and Zisserman first trained an
+11-layer version and copied its layers into the deeper ones as a starting point. (After
+submitting, they found that the carefully scaled random initialization of Glorot and Bengio —
+Module 02 — was enough.) GoogLeNet bolted two small extra classifiers onto its middle layers
+during training, explicitly to "increase the gradient signal that gets propagated back":
+if the gradient could not survive the trip from the top, inject more of it halfway down.
+
+The two great general fixes arrived in early 2015, five days apart. On February 6 the MSRA
+group — He, Zhang, Ren and Sun — published the initialization for ReLU networks that Module 02
+derived (the factor of 2 in $\mathrm{Var}(W) = 2/\text{fan-in}$), with which they trained
+30-layer networks from scratch and became the first to beat the 5.1% human benchmark, at
+4.94%. On February 11 Sergey Ioffe and Christian Szegedy at Google posted **batch
+normalization**: normalize every layer's activations using the statistics of the current
+mini-batch, so no layer's inputs can drift out of scale. With it, an Inception network reached
+its old accuracy in fourteen times fewer training steps, and an ensemble reached 4.9%.
+
+So by the spring of 2015 signals survived the trip forward and gradients the trip back — the
+two things that had made depth hard since the 1990s. Networks of twenty or thirty layers
+trained fine. Networks of fifty did not. In May, Rupesh Srivastava, Klaus Greff and Jürgen
+Schmidhuber at IDSIA posted **Highway Networks**, which trained a hundred layers by giving each
+one a learned gate that could pass its input through untouched, an idea borrowed from the LSTM
+(Module 07). And in December came ResNet, which made the gate permanently open.
+
+| Year | Milestone | What it added |
+|------|-----------|---------------|
+| 2012 | AlexNet | 8 layers, ReLU, dropout: 15.3% on ImageNet |
+| 2013 | Zeiler & Fergus (Clarifai) | an AlexNet tuned by visualizing its layers: 11.7% |
+| 2014 | VGG (Simonyan & Zisserman) | 16–19 layers of 3×3 convs; deep nets initialized from shallow ones |
+| 2014 | GoogLeNet (Szegedy et al.) | 22 layers; extra classifiers halfway down to boost the gradient: 6.7% |
+| 2015 | He et al., ReLU initialization | 30-layer plain nets trained from scratch: 4.94% |
+| 2015 | Ioffe & Szegedy, batch normalization | activations normalized per mini-batch: 14× fewer steps |
+| 2015 | Srivastava, Greff & Schmidhuber, highway networks | gated shortcuts, 100 layers |
+| 2015 | He, Zhang, Ren & Sun, ResNet | ungated shortcuts, 152 layers: 3.57% |
+
+## The intuition: learn the change, keep the original
+
+Here is the puzzle the ResNet paper starts from, in one sentence: **a deeper network can do
+everything a shallower one can, so it should never be worse — but it is.**
+
+The first half of that sentence is a construction. Take a trained 20-layer network and add 36
+layers. Set the new layers to compute the identity — output equals input — and the 56-layer
+network computes exactly what the 20-layer one did. Whatever the 20-layer network's training
+error, the 56-layer network *can* match it. If it does worse, it is not because the solution
+doesn't exist; it is because gradient descent, starting from random weights, fails to find
+it. This is not overfitting either: overfitting means doing well on the training data and
+badly on new data. The deep plain network does badly on the training data.
+
+He et al.'s diagnosis was that the identity is surprisingly hard for a stack of nonlinear
+layers to learn. Ask a layer of weights, a normalization and a ReLU to output exactly its
+input, and it must find one particular configuration among millions; random initialization
+starts it nowhere near. So make the identity the default. Let each block compute a correction
+$\mathcal{F}(x)$ and *add it to its input*:
+
+$$
+y = \mathcal{F}(x) + x .
+$$
+
+Now a block that should do nothing only has to drive $\mathcal{F}$ to zero — and small random
+weights already produce something close to zero. Extra blocks cost nothing: the network is
+free to ignore them. The layers learn the *residual*, the difference between what the block
+should output and what came in.
+
+A useful picture is a long document passed down a chain of editors. In a plain network every
+editor must retype the whole document from the copy they were handed, and errors compound:
+after fifty retypings little survives. In a residual network every editor receives the
+document, writes margin notes, and passes on the original *with* the notes. However long the
+chain, the original arrives intact; each editor contributes only a change.
+
+The picture has a second half, and it is the more important one: the chain carries feedback
+in the other direction too. During backpropagation the gradient travels from the output back
+to the first layers. In a plain network it must pass through every layer, multiplied by each
+layer's local derivative on the way — the problem Module 02 met as vanishing and exploding
+gradients. In a residual network every block has a path around it, and on that path the
+gradient is multiplied by exactly one. However deep the network, part of the error signal
+reaches the first block untouched.
+
+## The math: one addition, and one normalization
+
+Notation as in Modules 03–04: images $X$ of shape $(n, C, H, W)$, kernels $K$. A block's
+layers — two 3×3 convolutions, each followed by batch normalization, with a ReLU between — form
+its **residual function** $\mathcal{F}$ (calligraphic, since $F$ already counts filters).
+
+### The residual block
+
+The paper's basic block is
+
+$$
+z = \mathcal{F}(x) + x, \qquad y = \mathrm{relu}(z).
+$$
+
+Its backward pass is where the design pays off. $x$ reaches $z$ by two routes — through the
+layers and around them — and the chain rule's rule for a value used twice is to add the
+gradients from both:
+
+$$
+\frac{\partial L}{\partial x} \;=\; \frac{\partial L}{\partial z}\,\frac{\partial \mathcal{F}}{\partial x} \;+\; \frac{\partial L}{\partial z}.
+$$
+
+The second term never passes through a weight. To see what that does over many blocks, drop
+the ReLU after the addition (He et al.'s follow-up paper does exactly this, for this reason).
+Then $x_{\ell+1} = x_\ell + \mathcal{F}(x_\ell)$, which unrolls to
+
+$$
+x_L = x_\ell + \sum_{i=\ell}^{L-1} \mathcal{F}(x_i)
+$$
+
+for any earlier block $\ell$ and later block $L$, and differentiates to
+
+$$
+\frac{\partial L}{\partial x_\ell} \;=\; \frac{\partial L}{\partial x_L}\left(1 + \frac{\partial}{\partial x_\ell}\sum_{i=\ell}^{L-1}\mathcal{F}(x_i)\right).
+$$
+
+Compare a plain network, where $x_L = f_{L-1}(\cdots f_\ell(x_\ell))$ and the gradient is a
+*product* of $L - \ell$ layer Jacobians — which shrinks or grows geometrically with depth. In
+the residual network it is a *sum*, and one of its terms is the identity: the gradient at
+block $L$ is delivered to block $\ell$ directly, whatever the blocks in between are doing.
+
+### Shortcuts that change shape
+
+Every so often the network halves the resolution and doubles the channels, and then a block's
+input and output no longer have the same shape. The paper's CIFAR networks use **option (A)**:
+the shortcut takes every second pixel and pads the new channels with zeros,
+
+$$
+s(x)[i, c, u, v] = \begin{cases} x[i,\, c - c_0,\, 2u,\, 2v] & c_0 \le c < c_0 + C_{\text{in}} \\ 0 & \text{otherwise} \end{cases}
+$$
+
+— still parameter-free, still a straight path for the gradient (which is routed back to the
+kept pixels and dropped on the zero channels, which were not inputs). Because of it, a ResNet
+has *exactly* the parameters of its plain twin, which makes the comparison clean. Option (B)
+uses a strided 1×1 convolution on those few shortcuts instead.
+
+The networks also end differently from AlexNet. There is no stack of dense layers: **global
+average pooling** reduces each channel's final 8×8 map to one number, $y[i, c] = \frac{1}{HW}\sum_{h,w} x[i,c,h,w]$,
+and a single linear layer classifies. AlexNet kept 96% of its parameters in its dense layers;
+ResNet has almost none there.
+
+### Batch normalization
+
+Every convolution in a ResNet is followed by batch normalization. For each channel $c$, over
+the $m$ values it takes in a mini-batch — every pixel of every image —
+
+$$
+\mu_c = \frac{1}{m}\sum_i x_i, \qquad \sigma_c^2 = \frac{1}{m}\sum_i (x_i - \mu_c)^2,
+$$
+
+$$
+\hat{x}_i = \frac{x_i - \mu_c}{\sqrt{\sigma_c^2 + \epsilon}}, \qquad y_i = \gamma_c\,\hat{x}_i + \beta_c .
+$$
+
+The normalization forces each channel to mean 0 and variance 1; the learned $\gamma_c$ and
+$\beta_c$ then put back whatever scale and shift the network actually wants — including, if
+it wants, the original ones, so nothing is lost. One consequence is that the convolution
+before a batch normalization needs no bias: any constant it added would be subtracted again
+with the mean, and $\beta_c$ is the shift that survives.
+
+Its backward pass is the most interesting chain-rule exercise since Module 01, because every
+$x_j$ in the batch affects every $\hat{x}_i$ — directly when $i = j$, and through $\mu$ and
+$\sigma^2$, which all of them share:
+
+$$
+\frac{\partial \hat{x}_i}{\partial x_j} = \frac{1}{\sqrt{\sigma^2 + \epsilon}}\left([i = j] - \frac{1}{m} - \frac{\hat{x}_i\,\hat{x}_j}{m}\right).
+$$
+
+Summing over $i$ against the upstream gradient $g_i = \partial L/\partial y_i$ collapses this
+$m \times m$ Jacobian to a formula that reuses the parameter gradients themselves:
+
+$$
+\frac{\partial L}{\partial \beta} = \sum_i g_i, \qquad \frac{\partial L}{\partial \gamma} = \sum_i g_i\,\hat{x}_i,
+$$
+
+$$
+\frac{\partial L}{\partial x_j} = \frac{\gamma}{m\sqrt{\sigma^2+\epsilon}}\left(m\,g_j - \frac{\partial L}{\partial \beta} - \hat{x}_j\,\frac{\partial L}{\partial \gamma}\right).
+$$
+
+The two subtracted terms have a meaning. The forward pass made two changes to the input
+invisible: adding a constant to every $x$ of a channel (the mean absorbs it) and scaling them
+all (the variance absorbs it). The backward pass removes the gradient components along
+those two directions, so each channel's input gradient sums to zero — a fact the test suite
+checks, along with its near-twin: the gradient is orthogonal to $\hat{x}$ only up to the tiny
+$\epsilon$, which keeps a rescaling from being absorbed completely.
+
+A batch's statistics are an estimate, and at test time there may be no batch at all. So during
+training the layer also keeps running averages of $\mu$ and of the unbiased variance, and in
+evaluation mode it uses those instead. Then each channel is a fixed affine map, $y = \gamma
+(x - \bar\mu)/\sqrt{\bar\sigma^2 + \epsilon} + \beta$, and its backward pass is a single
+multiplication. Like Module 04's dropout, the layer behaves differently in `train()` and
+`eval()` modes — the source of a whole genre of bugs in which a network is accidentally
+evaluated in training mode and its predictions depend on what else is in the batch.
+
+Ioffe and Szegedy explained the method's success by **internal covariate shift**: each layer
+chases a moving target as the layers below it change, and normalization pins the target down.
+That explanation did not survive. In 2018 Santurkar, Tsipras, Ilyas and Madry showed that
+deliberately injecting covariate shift after a batch-normalization layer barely hurt it, and
+that its real effect is to make the loss surface smoother — gradients that are more
+predictive of where a step will land, so larger steps are safe. The method was right; the
+story was revised. That is a recurring pattern in this book.
+
+## The code: one `+` forward, one `+` backward
+
+The C library gains five functions
+([`lib/c/nanograd`](https://github.com/shaia/deep-learning-from-scratch/tree/main/lib/c/nanograd)):
+batch normalization's forward and backward, the option-(A) shortcut and global average pooling
+— and `ng_add`, which is the whole residual idea and is three lines long:
+
+```c
+void ng_add(const double *A, const double *B, double *Y, int n) {
+    for (int j = 0; j < n; j++) Y[j] = A[j] + B[j];
+}
+```
+
+It appears twice in each block of the toy program
+([`c/resnet.c`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/05-resnet/c/resnet.c)),
+once in each direction:
+
+```c
+/* forward: the block's output is its body plus its input */
+ng_batchnorm_forward(Z, g2, be2, U2, XH2, IS2, rm2, rv2, N, 16, 1, eps, mom, 1);
+ng_add(U2, A_in, S, N * 16);                   /* the residual connection */
+ng_relu_forward(S, A_out, N * 16);
+
+/* backward: the input fed the body AND the shortcut; its gradient is both */
+ng_relu_backward(S, DA, DS, N * 16);
+/* ...back through BN, linear, ReLU, BN, linear into DAIN... */
+ng_add(DAIN, DS, DA, N * 16);                  /* the two routes meet again */
+```
+
+`DS` — the gradient arriving at the block's output — is added to the input's gradient without
+passing through any layer. That is the "1" in the formula above, as a line of C. Remove the two
+`ng_add` calls and you have the plain network, with the same parameters and the same
+arithmetic otherwise; the C program trains both from the same initial weights.
+
+Batch normalization's backward is the formula, with its two sums computed first:
+
+```c
+for (int c = 0; c < C; c++) {
+    double sb = 0.0, sg = 0.0;                 /* dbeta, dgamma for channel c */
+    for (int i = 0; i < n; i++)
+        for (int k = 0; k < HW; k++) {
+            sb += dY[(i*C + c)*HW + k];
+            sg += dY[(i*C + c)*HW + k] * XHAT[(i*C + c)*HW + k];
+        }
+    const double kc = gamma[c] * invstd[c] / (double)m;
+    for (int i = 0; i < n; i++)
+        for (int k = 0; k < HW; k++) {
+            const int e = (i*C + c)*HW + k;
+            dX[e] = kc * ((double)m * dY[e] - sb - XHAT[e] * sg);
+        }
+}
+```
+
+The layout trick, `X[(i*C + c)*HW + k]`, lets one function serve both cases: after a linear
+layer `HW = 1` and each unit is a channel; after a convolution `HW = H*W` and every pixel of
+every image is another sample of its channel.
+
+In Python, `nanograd.Residual` wraps any list of layers, and its `backward` reads like the
+chain rule:
+
+```python
+def backward(self, dY):
+    dZ = self.act.backward(dY)                     # through the final ReLU
+    d_body = self.body.backward(dZ)                # the long way, through F
+    d_skip = dZ if self.shortcut is None else self.shortcut.backward(dZ)
+    return d_body + d_skip                         # the two routes meet again
+```
+
+Two library changes were about the laptop rather than the math. The deepest CIFAR networks
+would hold gigabytes of im2col patch matrices between the forward and backward passes, so
+`Conv2D(cache_cols=False)` rebuilds them in the backward pass instead; and because NumPy runs
+those copies on one core, `Conv2D(workers=k)` splits each batch across threads. Both produce
+bit-identical results — they change only how long you wait.
+
+The agreement test needs one more trick. As in Modules 03–04, the Python side has a mirror of
+the C toy that performs every floating-point operation in the C's order, so the two can be
+compared to the last digit. Until now that mirror was scalar Python loops; for a 34-layer
+network trained twice for 400 steps that takes minutes. But order only matters for *sums*:
+IEEE addition, subtraction, multiplication, division and square roots round each element
+identically whatever order the elements are visited in. So the mirror vectorizes all the
+elementwise work and runs only the sums in the C's loop order, with `np.add.accumulate` — which
+NumPy defines as the running sum $r_i = r_{i-1} + t_i$, exactly what `for (...) s += t[i];`
+computes:
+
+```python
+def _loop_sum(terms, start):
+    # ((start + t[0]) + t[1]) + ... : the C loop, vectorized over every other axis
+    return np.add.accumulate(np.concatenate([start[None], terms]), axis=0)[-1]
+```
+
+The result is bit-identical to the C, many times faster than scalar loops, and still says what
+it does.
+
+## The gradient check, and C↔Python agreement
+
+[`tests/test_agreement.py`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/05-resnet/tests/test_agreement.py)
+holds the usual three gates.
+
+**Gradients.** Batch normalization is finite-difference checked on dense and convolutional
+inputs, in training and in evaluation mode, for $\partial L/\partial x$, $\partial L/\partial \gamma$
+and $\partial L/\partial \beta$ (errors between $10^{-12}$ and $10^{-8}$), and pinned to its
+definition: the forward pass to Ioffe and Szegedy's Algorithm 1 and the backward pass to the full
+$m \times m$ Jacobian, both within $10^{-14}$, and the running statistics to their update rule.
+The residual block is checked with the identity shortcut, and with the zero-padding shortcut
+inside a downsampling convolutional block with global average pooling; small plain and residual
+toy networks are checked end to end, every parameter.
+
+**Agreement.** C and Python train the 34-layer toy twice — plain, then residual, from the same
+initial weights — for 400 full-batch steps each, and print an eight-number fingerprint per
+network: loss and accuracy in evaluation mode, the last batch loss, a checksum of all 9,298
+parameters, and four sentinel values. They agree **to every printed digit**, for both networks.
+Two more lines pin the C batch normalization over image maps and a downsampling residual block
+(forward, backward, every parameter gradient) to NumPy's.
+
+**Two Python paths** — and here this module found something new. The vectorized library and the
+C-order mirror compute the same initial loss and the same gradients for both twins, to about
+$10^{-10}$. For the residual twin they also agree after three training steps, to $10^{-11}$. For
+the *plain* twin they don't: after three steps their parameters differ by almost one percent.
+Neither is wrong. They sum in different orders — BLAS in one, the C's loops in the other — and
+the plain network's training amplifies the $10^{-16}$ rounding differences by orders of
+magnitude per step. The deep plain network is not just hard to train; it is *chaotic*, and the
+notebook measures that directly: nudge one weight by one part in $10^{12}$, and sixty steps
+later the two plain networks are unrelated, while the residual pair still agree to a few parts
+in ten thousand. The C program and the C-order mirror still agree to the last digit after all
+400 steps, because between them not even the order of a single addition differs.
+
+## Play with it
+
+The degradation problem is easiest to believe when you watch it happen. Below, a plain network
+and its residual twin — same depth, same initial weights, the same 128 points — train side by
+side. The only difference is the `+` in each of the right-hand network's blocks.
+
+<ResidualWidget />
+
+Start at **4 blocks** (10 layers) and press Play: both networks fit the spirals within a couple
+of hundred steps. Now pick **16 blocks** (34 layers). The residual twin fits every point as
+before — its loss falls four orders of magnitude — while the plain network plateaus with about a
+third of the points still wrong and its loss barely moving. At **24 blocks** it does worse still.
+Before pressing Play at 16 or 24, look at the gradient bars: the plain network's input-side
+blocks receive hundreds or thousands of times more gradient than its output-side ones — one
+learning rate cannot suit both — while the residual network's bars are level. Training flattens
+the plain network's profile soon enough (the tick marks keep the starting one on screen), but by
+then it is stuck. The widget's networks are this chapter's toy, with a different random seed;
+the pattern holds at every seed.
+
+## Watch it
+
+The chapter in about ninety seconds: the race to depth, the degradation problem in our toy and on
+CIFAR-10, the residual block and its shortcut, the gradient each block receives with and without
+it, depth working again, and the unraveled view of a ResNet as an ensemble of paths.
+
+<figure>
+  <video controls playsinline preload="metadata" width="720" style="max-width:100%;height:auto;border-radius:8px">
+    <source src={`${import.meta.env.BASE_URL}media/05-resnet.mp4`} type="video/mp4" />
+    Your browser does not support the video tag.
+  </video>
+  <figcaption style="font-size:0.85rem;color:var(--color-muted);margin-top:0.5rem">
+    ImageNet winners by depth; our plain networks fitting their training data worse as they
+    deepen, on the toy and on CIFAR-10; the residual block with its identity shortcut; the
+    gradient reaching each block of a 34-layer plain network and of its residual twin; the input
+    gradients of an 18-layer plain network and its twin; residual networks of every depth
+    fitting; three blocks unravelled into eight paths, and what deleting one block does to a
+    trained 56-layer network.
+  </figcaption>
+</figure>
+
+## Toy → real: deep spirals, then CIFAR-10
+
+The toy is built to isolate ResNet's problem, the way Module 04's mirror glyphs isolated
+AlexNet's: 128 points on two spirals wound one and a half times around each other, and a network
+of width 16 — a stem, then $D$ blocks of `Linear → BatchNorm → ReLU → Linear → BatchNorm → ReLU`,
+then a head — trained for 400 full-batch steps of SGD with momentum. It is a problem small
+networks solve, which is what makes failure at depth unambiguous. Over five seeds:
+
+| layers | plain: training accuracy | residual: training accuracy |
+|-------:|-------------------------:|----------------------------:|
+| 4 | 100% | 100% |
+| 6 | 100% | 100% |
+| 10 | 100% | 100% |
+| 18 | 100% | 100% |
+| 34 | 64.4% (worst seed 53%) | 100% |
+| 66 | 52.2% | 100% |
+
+Up to 18 layers every plain network fits every point. At 34 layers the same recipe leaves a third
+of the *training* points misclassified, and at 66 it is barely better than a coin. Every residual
+twin fits everything, and the deeper ones fit faster. The canonical run that C and Python agree
+on is the 34-layer pair: the plain network ends at 59.4% training accuracy, its residual twin at
+100% with a loss of $3 \times 10^{-5}$.
+
+Is it vanishing gradients? He et al. argued not — batch normalization, which every block here
+has, keeps the forward signal at unit variance, and "we also verify that the backward propagated
+gradients exhibit healthy norms with BN." Measure it: on the first training step, the gradient
+the 34-layer plain network's first block receives is **1,239 times** its last block's, and at 66
+layers the ratio is **1.1 million**. The gradients do not vanish; they *explode* toward the
+input. That is batch normalization's own doing in deep networks without shortcuts — Yang and
+colleagues proved it in 2019 — and no single learning rate suits blocks whose gradients differ
+by six orders of magnitude. The residual twins' ratios are 14 and 32.
+
+The same plain networks are chaotic, as the agreement test discovered, and their input-gradients
+shatter: walk the input along a line and the derivative of the output decorrelates into noise.
+The correlation between neighbouring points' gradients is 0.97 at 4 layers and gone (−0.05) by
+18. The residual twins hold it longer — 0.84 at 10 layers, 0.56 at 18 — but not forever: by 34
+layers theirs is down to about 0.1 as well, and they train perfectly anyway. Shattering is one
+symptom of a deep plain network, not the whole disease.
+
+One more measurement explains why every ResNet carries batch normalization. A residual block
+*adds* its branch to its input, so with nothing bounding the branches the signal grows with
+depth: at initialization, 32 residual blocks without batch normalization multiply the
+activations' scale by about 2,400; with a batch normalization closing each branch, by 5 — the
+square root of the depth, because each block adds one unit-variance term.
+
+Then CIFAR-10, with the paper's own networks. Section 4.2 of the ResNet paper describes a family
+small enough to study depth on: a 3×3 convolution, three stages of $n$ basic blocks at 16, 32 and
+64 channels (each stage after the first halving the resolution at its first block, with the
+option-(A) shortcut), global average pooling, and one linear layer — $6n + 2$ weight layers, so
+$n = 3$ is ResNet-20 and $n = 9$ is ResNet-56. The recipe is the paper's: He initialization,
+batch normalization after every convolution, no dropout, SGD with momentum at learning rate 0.1
+divided by ten twice, 4-pixel padding with random crops and mirroring. Module 04 had to replace
+AlexNet's SGD with Adam because a plain eight-layer network without batch normalization learned
+too slowly under it. With batch normalization, plain SGD at a high learning rate is simply the
+best choice again.
+
+First, the measurement from the toy, on a batch of real photos: at initialization the 56-layer
+plain network's first block receives about **600 times** the gradient of its last convolution,
+and its residual twin's ends differ by about 5. Then the paper's Figure 6. Training four networks
+for long enough to compare — plain and residual, 20 and 56 layers — would take days of NumPy at
+full size, so the depth experiment runs at half the paper's widths on photos shrunk to 16×16
+(each pixel the average of a 2×2 block), which keeps all 50,000 images and all 3,128 SGD steps of
+eight epochs at about an eighth of the cost. Degradation is about depth, not width or resolution.
+All four networks warm up at learning rate 0.01 for their first 400 steps, the paper's recipe for
+its deepest network.
+
+| network | final training error | test accuracy |
+|---------|---------------------:|--------------:|
+| plain, 20 layers | 40.8% | 61.8% |
+| plain, 56 layers | **67.5%** | **34.5%** |
+| ResNet, 20 layers | 32.5% | 68.4% |
+| ResNet, 56 layers | 32.3% | **68.6%** |
+
+The plain 56-layer network fits its own training data far worse than the 20-layer one — from the
+first epoch to the last, as in the paper's figure — and its test accuracy is little more than
+half the shallow network's. The residual 56-layer network finishes level with the 20-layer one:
+depth no longer hurts. (On this budget it only ties; the paper's ResNet-56 beats its ResNet-20 by
+1.8 points after 182 epochs, a margin eight epochs cannot resolve.) And the starkest number in
+the table is across it: at 56 layers, the residual network reaches 68.6% where its plain twin,
+with exactly the same parameters, reaches 34.5%.
+
+Then the canonical run: the paper's ResNet-20 exactly — full width, 0.27 million parameters — on
+all 50,000 full-size images, for eight epochs (weight decay $5 \times 10^{-4}$, the usual
+pairing for a short schedule, instead of the paper's $10^{-4}$). It took about six hours of NumPy
+on a laptop CPU, which is why the notebook caches it:
+
+| epoch | learning rate | training error | test accuracy |
+|------:|--------------:|---------------:|--------------:|
+| 1 | 0.1 | 59.6% | 47.5% |
+| 2 | 0.1 | 38.9% | 64.6% |
+| 3 | 0.1 | 30.2% | 63.3% |
+| 5 | 0.1 | 24.4% | 67.5% |
+| 6 (÷ 10) | 0.01 | 18.1% | 82.2% |
+| 7 | 0.01 | 16.5% | 82.8% |
+| 8 (÷ 100) | 0.001 | 15.2% | **84.0%** |
+
+It reaches **84.0%** test accuracy (the verification gate asserts at least 80%) — 11.7 points
+better than Module 04's AlexNet-mini, which reached 72.3% in fifteen epochs with more parameters
+(348,874 against 269,722). The jump at epoch 6 is the first learning-rate cut doing what it did
+in Module 04: the noisy steps that were exploring settle into the basin they found. While the
+learning rate was high, test accuracy wandered between 63% and 68% from one epoch to the next;
+batch normalization is what made a learning rate that high usable at all. The paper's ResNet-20,
+trained for 182 epochs, reached 91.25% — the remaining gap is the schedule, not the network.
+
+Finally, surgery. Following Veit, Wilber and Belongie, take the two trained 56-layer networks and
+delete one block at a time, at test time, scoring each lesioned network on 2,000 test images.
+Delete any single block of the plain network and it collapses to chance: from 34.5% intact to an
+average of 12.0% (between 4% and 24%, depending on the block). Delete any single block of the
+ResNet and it barely notices: from 68.2% to an average of 63.4%. Deleting a block deep in the
+network costs under a point; the costly ones are the very first block (42.3%) and the two that
+downsample (about 60%), whose shortcuts must change the representation's shape. Delete several
+at once and the damage compounds — two random blocks cost about twenty points, twelve of the
+twenty-seven bring it down to 16% — less gracefully than in Veit's fully trained 110-layer network,
+and swinging with whether the dice pick the first block. But the contrast is the point. That is
+the unraveled view, measured: a plain network's blocks are a chain, each useless without the one
+before it; most of a ResNet's blocks are corrections the rest of the network can do without.
+
+The [notebook](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/05-resnet/notebook.ipynb)
+closes with the frameworks. PyTorch checks strictly: `F.batch_norm` in training mode receives our
+inputs and returns our outputs and all three gradients to $10^{-13}$ or better — and its running
+statistics, which also weight the newest batch by 0.1 and keep the unbiased variance, to the last
+digit; a downsampling residual block built from `F.conv2d`, `F.batch_norm` and a zero-padded
+slice for the shortcut matches ours forward and backward, every parameter; and the 34-layer toy
+twins' 100 parameter gradients match autograd (the residual twin's to $4 \times 10^{-11}$; the
+plain twin's only to $2 \times 10^{-9}$, its exploding backward pass amplifying the two libraries'
+rounding even within one step). TensorFlow (a `GradientTape` loop with the shortcut written out
+as a strided slice and a channel pad) and Keras (the functional API, where a residual connection
+is simply a `layers.Add()` with two inputs) train ResNet-20 for three epochs to 74.3% and 73.0%.
+One translation is worth remembering: Keras's `BatchNormalization(momentum=0.9)` is the *same*
+rule as PyTorch's `momentum=0.1` — one names the weight of the old statistics, the other of the
+new.
+
+## What ResNet actually was
+
+The CIFAR networks were the paper's laboratory. The ImageNet networks that won were the same
+idea scaled up, with three changes worth knowing.
+
+**A stem and four stages.** A 7×7 stride-2 convolution and a max-pool shrink the 224×224 image
+to 56×56; four stages at 64, 128, 256 and 512 channels halve the resolution at each stage's
+first block; global average pooling and one 1,000-way linear layer finish. ResNet-18 and -34
+use the basic two-convolution block of this chapter.
+
+**Bottlenecks.** From 50 layers up, each block is three convolutions: a 1×1 that shrinks the
+channels to a quarter, a 3×3 at the reduced width, and a 1×1 that expands them back. Three
+layers for about the price of two, which is how ResNet-152 needs 11.3 billion multiply-adds
+for an image — less than VGG-16's 15.3 billion and VGG-19's 19.6, at eight times the depth.
+(The notebook recomputes those counts from the layer specifications and gets the paper's
+numbers.)
+
+**Projections.** On ImageNet the shape-changing shortcuts used option (B), a strided 1×1
+convolution, and the paper compared it with (A) and with projecting *every* shortcut (C). B
+beat A slightly and C beat B marginally — "but the small differences among A/B/C indicate
+that projection shortcuts are not essential." The point was the identity; how to bridge the
+occasional change of shape was a detail.
+
+The winning 3.57% was an ensemble of six networks of different depths; a single ResNet-152
+reached 4.49% top-5 error on the validation set, better than any previous *ensemble*. And the
+paper pushed one experiment past where it stopped working: on CIFAR-10 a 110-layer network
+reached 6.43% test error and a 1,202-layer one — 19.4 million parameters, trained without
+difficulty to under 0.1% training error — tested *worse*, at 7.93%. Past some depth the
+problem is overfitting again, the ordinary kind that Module 04's regularizers address. The
+degradation problem was solved; the old problems were back where they belonged.
+
+## Why it works: the arguments since
+
+The paper offered a hypothesis — the identity is hard to learn, the residual is easy — and a
+measurement: the trained residual functions really are small, their responses "generally
+closer to zero" than the plain network's layers. The decade since has added three better
+explanations, and this chapter's notebook reproduces each one.
+
+**The gradient's highway.** He et al.'s own follow-up, *Identity Mappings in Deep Residual
+Networks* (2016), made the derivation above the central argument, and drew its consequence:
+anything placed *on* the shortcut — a scaling, a gate, a dropout — multiplies the "1", and
+compounded over a hundred blocks brings the problem back. Moving the batch normalization and
+ReLU inside the branch, so that nothing at all touches the identity path, let them train a
+1,001-layer CIFAR network to 4.62% error.
+
+**Shattered gradients.** Balduzzi and colleagues (2017) looked at the gradient as a function of
+the *input* rather than of depth, and found that in a deep plain network it decorrelates into
+something indistinguishable from white noise: two inputs a hair apart get unrelated gradients,
+so a step that helps one is a random kick to its neighbours. Residual networks keep the
+gradient structured — their correlations decay sublinearly with depth, the plain network's
+exponentially. Batch normalization does not fix this; in deep plain networks, Yang and
+colleagues proved in 2019, it is batch normalization itself that makes gradients explode.
+
+**An ensemble of shallow networks.** The most surprising view came from Andreas Veit, Michael
+Wilber and Serge Belongie (2016). Unroll a residual network: at every block, a signal can go
+through the residual function or around it, so $n$ blocks contain $2^n$ paths of different
+lengths, most of them far shorter than the network. They then performed surgery. Deleting any
+single layer from a trained VGG network drops its accuracy to chance — every later layer was
+trained on what the deleted one produced. Deleting a block from a trained ResNet barely
+matters, and deleting many degrades it smoothly, as if removing members from an ensemble.
+Nearly all of the gradient during training, they found, flows through paths of only 5–17
+blocks in a 54-block network. On this view a ResNet is not so much a very deep network as a
+very large collection of moderately deep ones that share their weights — and the residual
+connection is what lets that collection train.
+
+Residual connections are now in essentially every deep network, including every Transformer
+(Module 13), where each attention and feed-forward layer is a residual block with a
+normalization. Batch normalization has been joined by layer normalization and others, and
+ways to train ResNets *without* any normalization were found — by scaling each residual branch
+down at initialization so the sum stays in range — but the shortcut itself has never been
+replaced.
+
+## What it couldn't do
+
+ResNet settled how to train depth in a stack of layers. It said nothing about a different kind
+of depth that the next chapters need.
+
+Everything since Module 00 has been a function of a fixed-size input: a 2-D point, a 28×28
+digit, a 32×32 photo. Language, speech and music are sequences, of any length, where what
+matters about the tenth word depends on the first. The natural network for them applies the
+*same* layer again at every step of the sequence, feeding it its own previous output — a
+recurrent network. Unrolled over a hundred-word sentence, that is a hundred-layer network with
+one set of weights, and it has the vanishing and exploding gradients of this chapter in their
+most severe form, because the same Jacobian is multiplied a hundred times.
+
+The fix for recurrent networks was found first, in 1997 — Module 07's LSTM, whose "constant
+error carousel" is a path along which the gradient is multiplied by exactly one, through time
+instead of through depth. Highway networks borrowed the idea back for depth; ResNet removed
+its gate. First, though, the plain recurrent network itself.
+
+## Exercises & what's next
+
+1. **Zero-init the last scale.** Initialize the second batch normalization's $\gamma$ in every
+   residual block to zero, so each block starts as the identity and the whole network as its
+   stem and head. Train the 66-layer toy twin both ways and compare the loss curves. Why can't the
+   plain twin use the same trick?
+2. **Pre-activation.** Move each block's final ReLU inside the branch, so that
+   $x_{\ell+1} = x_\ell + \mathcal{F}(x_\ell)$ with $\mathcal{F}$ = BN → ReLU → Linear → BN →
+   ReLU → Linear. Rerun the toy's depth sweep and gradient profile. What changes — and why does the
+   derivation in "The math" now hold exactly?
+3. **A scale on the shortcut.** Replace the shortcut's $x$ with $\lambda x$, for $\lambda = 0.5$
+   and then $\lambda = 1.5$. Measure the first-to-last-block gradient ratio at 34 and 66 layers,
+   and relate what you see to the $(1 + \cdots)$ in the gradient formula.
+4. **A batch of one.** In training mode, what does batch normalization output for a batch of one
+   example? After a convolution the statistics run over pixels too — does the problem go away?
+   What does evaluation mode do with the same input?
+5. **Delete blocks during training.** *Stochastic depth* (Huang et al., 2016) drops each residual
+   block with some probability at every training step, keeping only its shortcut — dropout for
+   whole blocks. Add it to the toy with probability 0.5 and compare it with Module 04's dropout.
+   Why can't a plain network do this?
+6. **Bottlenecks.** Count the parameters and multiply-adds of a basic block (two 3×3 convolutions
+   at 256 channels) and of a bottleneck block (1×1 down to 64, 3×3 at 64, 1×1 back to 256) on a
+   14×14 map, and check the notebook's ResNet-152 count by hand for one stage.
+
+Then go into the code: the self-verifying
+[`notebook.ipynb`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/05-resnet/notebook.ipynb)
+rebuilds every result above and cross-checks against PyTorch, TensorFlow and Keras, while
+[`assignment.ipynb`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/05-resnet/assignment.ipynb)
+hands you four load-bearing pieces — batch normalization's forward pass and its backward pass,
+the residual block with its forked backward, and the zero-padding shortcut — to implement
+yourself, graded against finite differences and the canonical library, and finally dropped into
+a harness that must reproduce the toy: a 34-layer plain network that cannot fit two spirals, and
+its residual twin that fits every point. All of it lives in
+[`topics/05-resnet/`](https://github.com/shaia/deep-learning-from-scratch/tree/main/topics/05-resnet).
+
+Depth through a stack of layers is solved. The next chapters need a different kind of depth —
+the same layer applied again and again, once per word of a sentence.
+
+---
+
+*Next: Recurrent networks — sharing weights across time.*

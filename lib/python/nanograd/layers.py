@@ -24,34 +24,42 @@ import numpy as np
 # Linear (fully-connected): the only layer with learnable parameters.
 #   forward:  Y = X W + b            X:(m, n_in)  W:(n_in, n_out)  b:(n_out,)
 #   backward: dX = dY W^T,  dW = X^T dY,  db = sum_rows dY
+#
+# bias=False (Module 05) drops b: a layer feeding a BatchNorm needs none,
+# because BatchNorm subtracts each unit's mean -- any constant b would be
+# removed again -- and its own beta is the shift that survives.
 # ---------------------------------------------------------------------------
 class Linear:
-    def __init__(self, n_in: int, n_out: int):
+    def __init__(self, n_in: int, n_out: int, bias: bool = True):
         self.W = np.zeros((n_in, n_out))
-        self.b = np.zeros(n_out)
+        self.b = np.zeros(n_out) if bias else None
         self.dW = np.zeros_like(self.W)
-        self.db = np.zeros_like(self.b)
+        self.db = np.zeros_like(self.b) if bias else None
         self.X = None
 
     def forward(self, X):
         self.X = X                       # cache input for the weight gradient
+        if self.b is None:
+            return X @ self.W
         return X @ self.W + self.b
 
     def backward(self, dY):
         self.dW = self.X.T @ dY          # dL/dW = X^T dY
-        self.db = dY.sum(axis=0)         # dL/db = column sums of dY
+        if self.b is not None:
+            self.db = dY.sum(axis=0)     # dL/db = column sums of dY
         return dY @ self.W.T             # dL/dX, handed to the previous layer
 
     def params(self):
-        return [self.W, self.b]
+        return [self.W] if self.b is None else [self.W, self.b]
 
     def grads(self):
-        return [self.dW, self.db]
+        return [self.dW] if self.b is None else [self.dW, self.db]
 
     def astype(self, dtype):
         """Re-store the parameters at another precision (see Sequential.astype)."""
         self.W = self.W.astype(dtype)
-        self.b = self.b.astype(dtype)
+        if self.b is not None:
+            self.b = self.b.astype(dtype)
         return self
 
 

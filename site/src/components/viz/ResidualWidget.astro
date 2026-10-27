@@ -1,0 +1,167 @@
+---
+// Module 05's interactive: the degradation problem, and the shortcut that fixes
+// it. A plain network and its residual twin -- same depth, same initial weights
+// -- train side by side on two interleaved spirals; a per-block gradient chart
+// shows the plain one's gradient piling up on its input side. Embed in MDX with:
+//   import ResidualWidget from '../../components/viz/ResidualWidget.astro'
+import WidgetFrame from './WidgetFrame.astro';
+---
+
+<WidgetFrame
+  title="Deeper should be better"
+  caption="Two networks of the same depth start from identical weights and train on the same 128 points; the only difference is that each block of the right-hand twin adds its input back. Start at 4 blocks and press Play: both fit the spirals. Now pick 16 or 24 blocks: the plain net stalls well short of 100% — a deeper network doing worse on its own training data — while the residual twin fits every point. Before pressing Play, look at the gradient bars (bottom right): at step 0 the deep plain net's input-side blocks receive orders of magnitude more gradient than its output side, while the residual net's bars are level. Training flattens them, but the ticks keep the step-0 profile on screen."
+  alt="Left: two square plots of two interleaved spirals, circles for one class and squares for the other, over shaded decision regions that change as the networks train; the first plot is the plain network, the second its residual twin. Right, top: training loss against step on a log scale, a dashed line for the plain network and a solid line for the residual one. Right, bottom: bar charts of the gradient norm reaching each block from the input side to the output side on a log scale, plain and residual side by side; in deep networks the plain bars span orders of magnitude and the residual bars stay level."
+>
+  <div class="panels">
+    <div class="panel panel--surfaces">
+      <div class="panel__label">decision regions — plain (left) vs residual twin (right)</div>
+      <div class="pair">
+        <canvas id="res-plain" width="260" height="260" style="max-width:100%;height:auto"></canvas>
+        <canvas id="res-resid" width="260" height="260" style="max-width:100%;height:auto"></canvas>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel__label">loss · gradient per block</div>
+      <canvas id="res-loss" width="420" height="200" style="max-width:100%;height:auto"></canvas>
+      <canvas id="res-grad" width="420" height="200" style="max-width:100%;height:auto"></canvas>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="res-play" type="button">▶ Play</button>
+    <button id="res-step" type="button">Step</button>
+    <button id="res-reset" type="button">Reset</button>
+    <div class="seg" role="group" aria-label="Depth in blocks">
+      <span class="seg__label">blocks =</span>
+      <button type="button" class="seg__btn" data-d="1">1</button>
+      <button type="button" class="seg__btn" data-d="4">4</button>
+      <button type="button" class="seg__btn" data-d="8">8</button>
+      <button type="button" class="seg__btn is-on" data-d="16">16</button>
+      <button type="button" class="seg__btn" data-d="24">24</button>
+    </div>
+  </div>
+
+  <div id="res-stats" class="stats mono" aria-live="polite"></div>
+</WidgetFrame>
+
+<script>
+  import { mountResidual, type ResidualStats } from './residualCore';
+
+  const plain = document.getElementById('res-plain') as HTMLCanvasElement | null;
+  const resid = document.getElementById('res-resid') as HTMLCanvasElement | null;
+  const loss = document.getElementById('res-loss') as HTMLCanvasElement | null;
+  const grad = document.getElementById('res-grad') as HTMLCanvasElement | null;
+  const playBtn = document.getElementById('res-play') as HTMLButtonElement | null;
+  const stepBtn = document.getElementById('res-step');
+  const resetBtn = document.getElementById('res-reset');
+  const stats = document.getElementById('res-stats');
+  const dBtns = Array.from(document.querySelectorAll<HTMLButtonElement>('.seg__btn[data-d]'));
+
+  if (plain && resid && loss && grad) {
+    // Reduced motion: no autoplay; Step advances 10 SGD steps at a time.
+    // (Read here, not from the handles: mountResidual reports stats once
+    // before it returns, so `w` does not exist yet on that first call.)
+    const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const w = mountResidual({ plain, resid, loss, grad }, {
+      onStats(s: ResidualStats) {
+        if (playBtn) {
+          playBtn.textContent = reducedMotion ? 'autoplay off'
+            : s.playing ? '⏸ Pause' : s.done ? 'done' : '▶ Play';
+          playBtn.disabled = s.done || reducedMotion;
+        }
+        if (stats) {
+          stats.innerHTML =
+            `<span>step ${s.step}</span>` +
+            `<span>${s.layers} layers</span>` +
+            `<span>plain fits ${Math.round(s.plainAcc * 100)}%</span>` +
+            `<span>residual fits ${Math.round(s.residAcc * 100)}%</span>`;
+        }
+      },
+    });
+
+    playBtn?.addEventListener('click', () => w.toggle());
+    stepBtn?.addEventListener('click', () => w.step());
+    resetBtn?.addEventListener('click', () => w.reset());
+    for (const b of dBtns) {
+      b.addEventListener('click', () => {
+        w.setDepth(Number(b.dataset.d));
+        for (const o of dBtns) o.classList.toggle('is-on', o === b);
+      });
+    }
+  }
+</script>
+
+<style>
+  .panels {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 0.75rem;
+    width: 100%;
+    justify-items: center;
+  }
+  .panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+    min-width: 0;
+  }
+  .pair {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: center;
+  }
+  .panel__label {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.75rem;
+    color: var(--color-muted);
+  }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    justify-content: center;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.85rem;
+  }
+  .controls button {
+    padding: 0.35rem 0.9rem;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-bg);
+    color: var(--color-text);
+    cursor: pointer;
+  }
+  .controls button:hover {
+    border-color: var(--viz-accent);
+    color: var(--viz-accent);
+  }
+  .controls button:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .seg { display: inline-flex; align-items: center; }
+  .seg__label { color: var(--color-muted); margin-right: 0.4rem; }
+  .seg__btn { border-radius: 0 !important; }
+  .seg__btn + .seg__btn { border-left: none !important; }
+  .seg__btn:first-of-type { border-radius: 6px 0 0 6px !important; }
+  .seg__btn:last-of-type { border-radius: 0 6px 6px 0 !important; }
+  .seg__btn.is-on {
+    background: var(--viz-accent) !important;
+    color: #fff !important;
+    border-color: var(--viz-accent) !important;
+  }
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: center;
+    font-size: 0.85rem;
+    color: var(--color-muted);
+  }
+  .mono {
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  }
+</style>

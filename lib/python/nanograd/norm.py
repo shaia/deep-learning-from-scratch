@@ -33,6 +33,9 @@ upstream gradient over i collapses to
 NOTE on PyTorch: torch.nn.functional.local_response_norm divides alpha by n
 (b = a / (k + alpha/n * sum a^2)^beta). To match the paper with torch, pass
 alpha * n. The notebook's framework-mirrors section does exactly that.
+
+BatchNorm (Module 05; Ioffe & Szegedy 2015) is the replacement -- see its
+class below for the derivation.
 """
 
 import numpy as np
@@ -77,3 +80,120 @@ class LocalResponseNorm:
 
     def params(self): return []
     def grads(self): return []
+
+
+# ---------------------------------------------------------------------------
+# Batch normalization (Module 05; Ioffe & Szegedy 2015). LRN tamed activation
+# scales with a fixed local rule; BatchNorm measures them and normalizes
+# directly. For every channel, over the m values it takes in one batch (for a
+# Linear's (m, C) output, m = batch size; for a conv's (n, C, H, W) output,
+# m = n*H*W -- every pixel of every image is a sample of that channel):
+#
+#     mu  = (1/m) sum x_i                 var = (1/m) sum (x_i - mu)^2
+#     xhat_i = (x_i - mu) / sqrt(var + eps)      y_i = gamma * xhat_i + beta
+#
+# so each channel enters the next layer with mean 0 and variance 1, then a
+# learned scale and shift (gamma, beta) give back whatever range the network
+# actually wants -- including, with gamma = sqrt(var+eps) and beta = mu, the
+# identity. beta does a bias's job, which is why the layer before a BatchNorm
+# goes without one (Linear/Conv2D bias=False).
+#
+# The backward pass, derived once. Every x_j moves every xhat_i -- directly,
+# and through mu and var, which all m values share -- so with g_i = dL/dy_i,
+#
+#     dxhat_i/dx_j = invstd * ([i = j] - 1/m - xhat_i * xhat_j / m)
+#
+# and summing g_i * gamma over i collapses, with dbeta = sum g_i and
+# dgamma = sum g_i * xhat_i, to
+#
+#     dx_j = (gamma * invstd / m) * (m * g_j - dbeta - xhat_j * dgamma).
+#
+# The two subtracted terms remove the gradient components along the two
+# directions the forward pass made irrelevant: shifting every x of the
+# channel by a constant (mu absorbs it -- exactly, so sum_j dx_j = 0) and
+# scaling them all (var absorbs it -- up to the eps in sqrt(var + eps), so
+# sum_j dx_j * xhat_j is tiny rather than zero). The very sums that give
+# dgamma and dbeta assemble dx.
+#
+# Training vs evaluation. A batch's statistics are only an estimate, and at
+# test time there may be no batch at all, so training also keeps running
+# averages (PyTorch's convention: momentum = weight of the newest batch)
+#
+#     running_mean <- (1 - momentum) * running_mean + momentum * mu
+#     running_var  <- (1 - momentum) * running_var  + momentum * var * m/(m-1)
+#
+# (the unbiased variance -- the paper's inference estimate), and eval() swaps
+# them in for mu and var. Then each channel is a fixed affine map, so the
+# backward is just dx = g * gamma * invstd. Like Dropout, the layer has a
+# `training` flag that Sequential.train()/.eval() flip.
+#
+# lib/c/nanograd/norm.c's ng_batchnorm_* implement the same formulas, written
+# in the same operation order.
+# ---------------------------------------------------------------------------
+class BatchNorm:
+    def __init__(self, C: int, eps: float = 1e-5, momentum: float = 0.1):
+        self.gamma = np.ones(C)
+        self.beta = np.zeros(C)
+        self.dgamma = np.zeros_like(self.gamma)
+        self.dbeta = np.zeros_like(self.beta)
+        self.running_mean = np.zeros(C)
+        self.running_var = np.ones(C)
+        self.eps, self.momentum = eps, momentum
+        self.training = True
+        self.xhat = self.invstd = None
+
+    @staticmethod
+    def _axes(X):
+        """The axes a channel's statistics run over: all but axis 1."""
+        return (0,) + tuple(range(2, X.ndim))
+
+    @staticmethod
+    def _per_channel(v, X):
+        """Reshape a (C,) vector to broadcast against X: (1, C) or (1, C, 1, 1)."""
+        return v.reshape((1, -1) + (1,) * (X.ndim - 2))
+
+    def forward(self, X):
+        axes, pc = self._axes(X), self._per_channel
+        if self.training:
+            m = X.size // X.shape[1]
+            assert m > 1, "BatchNorm needs more than one value per channel to train"
+            mu = X.mean(axis=axes)
+            var = ((X - pc(mu, X)) ** 2).mean(axis=axes)     # biased: this batch's spread
+            mom = self.momentum
+            self.running_mean = (1 - mom) * self.running_mean + mom * mu
+            self.running_var = (1 - mom) * self.running_var + mom * (var * m / (m - 1))
+            self.invstd = 1.0 / np.sqrt(var + self.eps)
+            self.xhat = (X - pc(mu, X)) * pc(self.invstd, X)
+        else:
+            self.invstd = 1.0 / np.sqrt(self.running_var + self.eps)
+            self.xhat = (X - pc(self.running_mean, X)) * pc(self.invstd, X)
+        return pc(self.gamma, X) * self.xhat + pc(self.beta, X)
+
+    def backward(self, dY):
+        axes, pc = self._axes(dY), self._per_channel
+        self.dbeta = dY.sum(axis=axes)
+        self.dgamma = (dY * self.xhat).sum(axis=axes)
+        if not self.training:            # fixed statistics: a per-channel affine map
+            return dY * pc(self.gamma, dY) * pc(self.invstd, dY)
+        m = dY.size // dY.shape[1]
+        k = pc(self.gamma * self.invstd / m, dY)
+        return k * (m * dY - pc(self.dbeta, dY) - self.xhat * pc(self.dgamma, dY))
+
+    def params(self):
+        return [self.gamma, self.beta]
+
+    def grads(self):
+        return [self.dgamma, self.dbeta]
+
+    def buffers(self):
+        """State that is not learned by gradient descent but must be saved
+        with the weights: the running statistics evaluation uses."""
+        return [self.running_mean, self.running_var]
+
+    def astype(self, dtype):
+        """Re-store parameters and running statistics at another precision."""
+        self.gamma = self.gamma.astype(dtype)
+        self.beta = self.beta.astype(dtype)
+        self.running_mean = self.running_mean.astype(dtype)
+        self.running_var = self.running_var.astype(dtype)
+        return self
