@@ -8,6 +8,7 @@ add_library(nanograd STATIC
   conv.c
   norm.c
   augment.c
+  rnn.c
 )
 
 # Public header dir, so `#include "nanograd.h"` works for anything that links us.

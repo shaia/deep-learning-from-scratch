@@ -212,6 +212,33 @@ void ng_global_avgpool_backward(const double *dY, double *dX,
                                 int n, int C, int H, int W);
 
 /* ---------------------------------------------------------------------------
+ * Recurrent networks (Module 06, RNN).
+ *
+ * A vanilla tanh RNN over a whole sequence, time-major:
+ *   X:[T,m,n_in]  h0:[m,n_h]  Wxh:[n_in,n_h]  Whh:[n_h,n_h]  bh:[n_h]  ->  H:[T,m,n_h]
+ *   h<t> = tanh(x<t> Wxh + h<t-1> Whh + bh)       (h0 NULL: the zero state)
+ * Backward is backpropagation through time: given dH = dL/dh<t> for every step
+ * it writes dZ = dL/dz<t> ([T,m,n_h], the gradient through time), dX and dh0
+ * (either may be NULL), and the shared weights' gradients, SUMMED over every
+ * step and row. truncate = k > 0 cuts the gradient's path into the past every
+ * k steps (k = 1: Elman's 1990 training); 0 is full BPTT. Loop orders are
+ * documented in rnn.c -- the Python mirror depends on them.
+ *
+ * Gradient-norm clipping (Pascanu, Mikolov & Bengio 2013) over a flat array of
+ * n gradients: if ||g|| > max_norm, g *= max_norm/||g||. Returns ||g|| before
+ * clipping.
+ * ------------------------------------------------------------------------- */
+void ng_rnn_forward(const double *X, const double *h0,
+                    const double *Wxh, const double *Whh, const double *bh,
+                    double *H, int T, int m, int n_in, int n_h);
+void ng_rnn_backward(const double *X, const double *h0, const double *H,
+                     const double *Wxh, const double *Whh, const double *dH,
+                     double *dZ, double *dX, double *dh0,
+                     double *dWxh, double *dWhh, double *dbh,
+                     int T, int m, int n_in, int n_h, int truncate);
+double ng_clip_grad_norm(double *g, int n, double max_norm);
+
+/* ---------------------------------------------------------------------------
  * Optimizers, over a flat parameter array of length n. State buffers (velocity
  * / running averages / moments) are caller-owned and zero-initialized once.
  * L2 weight decay adds weight_decay*theta to the gradient.

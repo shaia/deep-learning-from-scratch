@@ -1,0 +1,558 @@
+---
+title: Recurrent Networks
+moduleNumber: 6
+description: How a network learns to read a sequence — one layer applied at every step, carrying a memory forward. From Elman's 1990 network that found word boundaries on its own to backpropagation through time; a toy that shows an RNN learns to remember only as far back as its gradient reaches, and why that gradient vanishes or explodes; a state machine it builds for free; and a character-level model of Shakespeare that beats every n-gram table — from scratch in C and NumPy.
+draft: false
+---
+
+import EchoWidget from '../../components/viz/EchoWidget.astro';
+
+## Finding structure in time
+
+In 1990 the journal *Cognitive Science* published a paper by Jeffrey Elman, a linguist at the
+University of California, San Diego, with a deceptively modest title: *Finding Structure in Time*. Its question was how a neural network should represent time at all. The
+usual answer in the 1980s was to turn time into space. NETtalk, the famous network of 1987 that
+learned to read English aloud, saw text through a window seven letters wide: the whole window was
+one input vector, and the network had no idea that the letters in it had come in an order. Elman
+pointed out what that costs. The window has a fixed length, so nothing outside it can matter; and
+the same word, shifted by one position, is an entirely different input pattern that must be
+learned again from scratch.
+
+His proposal was to let time be represented by its *effect* on processing. Give the network a
+memory: a set of "context units" that hold a copy of the hidden layer from the previous step and
+feed it back in, alongside the next input. The network reads a sequence one item at a time, and
+what it has read so far lives in its hidden state. Elman trained such a network to do one thing —
+predict the next item — and then looked inside.
+
+The results are still striking. Fed a stream of letters from simple English sentences with the
+spaces removed, the network's prediction error rose at the start of each word and fell steadily
+through it: it had found the word boundaries, which nobody had marked, from the statistics of the
+stream alone. Fed sentences one word at a time, its hidden states clustered by grammatical role —
+nouns apart from verbs, animate nouns apart from inanimate ones, humans apart from animals —
+categories nobody had given it, discovered because they help predict what comes next.
+
+This chapter builds Elman's network and the training method that makes it work in full,
+backpropagation through time, which Paul Werbos published the same year. It shows what a
+recurrent network can learn and what it cannot, measures *why* — a gradient that shrinks or grows
+geometrically as it travels back in time — and ends with a model that writes Shakespeare one
+character at a time, and rediscovers Elman's word boundaries on the way.
+
+## Memory, 1982–2015
+
+Recurrent networks are as old as neural networks; the trouble was always training them.
+
+In 1982 John Hopfield described a network in which every unit feeds every other, and showed that
+it settles into stored patterns like a ball rolling into a valley — a memory, but of states, not
+sequences. In the 1986 volumes of *Parallel Distributed Processing* that made backpropagation
+famous (Module 01), Rumelhart, Hinton and Williams already noted that a recurrent network can be
+*unfolded* in time into a layered network whose layers share their weights, and trained like one.
+Michael Jordan, the same year, fed a network's output back into it as a state. In 1989 Alex Waibel
+and colleagues took the other road for speech: the *time-delay neural network* slid the same
+weights along the time axis — a convolution in time, Module 03's weight sharing on a fixed
+window. Ronald Williams and David Zipser found a way to train fully recurrent networks *online*,
+carrying gradients forward as the sequence arrives.
+
+Then 1990: Elman's simple recurrent network, and Werbos's tutorial, *Backpropagation Through Time:
+What It Does and How to Do It*. Werbos — who had proposed backpropagation itself in his 1974
+thesis — had already used it on a recurrent model of the natural-gas market in 1988. Elman trained
+his network with only the last step of it: the context units were treated as just another input,
+and the gradient stopped there.
+
+The next discovery was bad news. In his 1991 diploma thesis in Munich, Sepp Hochreiter analysed
+how the error signal behaves as it is propagated back through many time steps, and found that it
+either vanishes exponentially or blows up. Three years later Yoshua Bengio, Patrice Simard and
+Paolo Frasconi proved that this is not an accident of a bad initialization: a recurrent network
+that stores information *robustly* — so that small noise cannot erase it — is exactly one whose
+gradients from the distant past vanish. Learning long-range dependencies by gradient descent was,
+in their title's word, *difficult*. The fix (Module 07) came in 1997, and recurrent networks spent
+the next decade as a specialist's tool.
+
+They came back with language. In 2010 Tomáš Mikolov's recurrent language model beat the n-gram
+counts that had dominated speech recognition for decades. In 2011 Ilya Sutskever — whose reading
+list this book follows — with James Martens and Geoffrey Hinton trained a recurrent network on
+Wikipedia one character at a time and had it write. In 2013 Razvan Pascanu, Mikolov and Bengio
+explained the exploding half of Hochreiter's problem as cliffs in the loss surface and made
+gradient clipping standard. And in May 2015 Andrej Karpathy published *The Unreasonable
+Effectiveness of Recurrent Neural Networks*, with code and samples — fake Shakespeare, fake
+Wikipedia, fake Linux source — that made character-level models the "hello world" of deep learning
+for text. His Tiny Shakespeare is this chapter's dataset.
+
+| Year | Milestone | What it added |
+|------|-----------|---------------|
+| 1982 | Hopfield | a recurrent network as a memory of patterns |
+| 1986 | Rumelhart, Hinton & Williams; Jordan | recurrent nets unfolded in time; output fed back as state |
+| 1987 | NETtalk (Sejnowski & Rosenberg) | time as a fixed window of input |
+| 1989 | Waibel et al., TDNN | time as a convolution |
+| 1989 | Williams & Zipser | real-time recurrent learning |
+| 1990 | Elman; Werbos | the simple recurrent network; backpropagation through time |
+| 1991 | Hochreiter | the gradient through time vanishes or explodes |
+| 1994 | Bengio, Simard & Frasconi | …and must, if memories are to be robust |
+| 1997 | Hochreiter & Schmidhuber | the LSTM (Module 07) |
+| 2010 | Mikolov et al. | a recurrent language model beats n-grams |
+| 2011 | Sutskever, Martens & Hinton | character-level text generation |
+| 2013 | Pascanu, Mikolov & Bengio | exploding gradients explained; clipping |
+| 2015 | Karpathy | char-rnn, Tiny Shakespeare |
+
+## The intuition: one rule, applied at every step
+
+Think of reading a novel. You do not reread from page one before every new page; you carry a
+running summary — who is where, who wants what — and update it as each sentence comes in, by the
+same habits of reading on page 3 as on page 300. A recurrent network is that. Its hidden state is
+the running summary; at every step it combines the summary with the next input to make the next
+summary, using **one set of weights** for every step. Nothing about the rule depends on the
+position, so the network handles a sentence of four words or a book of four million characters
+with the same parameters, and what it learns at one position it knows at every other — Module 03's
+weight sharing, across time instead of across an image.
+
+Unroll the reading and it is a deep network: one layer per step, every layer identical. Training
+it is backpropagation through that unrolled network, and it carries an obvious difficulty. Suppose
+the summary at page 300 lacks something that was on page 3. The blame has to travel back 297 steps,
+through 297 copies of the same layer, to reach the moment the summary should have kept it. Each
+step multiplies the blame by the same matrix. Multiply anything by the same factor 297 times and it
+is either nearly zero or astronomically large; only a factor of exactly one survives. That single
+fact — **the gradient through time is a power of a matrix** — is the subject of most of this chapter,
+and the reason the next one exists.
+
+## The math: recurrence, and backpropagation through time
+
+Notation as in the notation guide: row vectors times weight matrices, rows = samples, and the
+superscript $\langle t\rangle$ for time. A sequence is $x^{\langle 0\rangle}, \ldots, x^{\langle T-1\rangle}$, each
+$x^{\langle t\rangle}$ a batch of $m$ inputs; for characters, a one-hot vector over the vocabulary.
+
+### The recurrence
+
+The hidden state starts at $h^{\langle -1\rangle} = h_0$ (usually zeros) and is updated at every step:
+
+$$
+z^{\langle t\rangle} = x^{\langle t\rangle} W_{xh} + h^{\langle t-1\rangle} W_{hh} + b_h, \qquad
+h^{\langle t\rangle} = \tanh\big(z^{\langle t\rangle}\big).
+$$
+
+A read-out turns each state into a prediction, $\hat y^{\langle t\rangle} = \mathrm{softmax}(h^{\langle t\rangle} W_{hy} + b_y)$,
+and the loss averages the cross-entropy over every step that has a target. $W_{xh}$, $W_{hh}$ and $b_h$
+are the same at every step. (Multiplying a one-hot $x$ by $W_{xh}$ simply picks one row of $W_{xh}$
+— which is why frameworks implement it as a table lookup, an *embedding*.)
+
+### Backpropagation through time
+
+Unrolled, the recurrence is a $T$-layer network, and its backward pass needs only two rules this
+book already has.
+
+**A state is used twice** — by the read-out at its own step and by the next step. As at Module 05's
+residual fork, its gradient is the sum of both routes. Walking backwards from the last step,
+
+$$
+\frac{\partial L}{\partial h^{\langle t\rangle}} = \underbrace{\frac{\partial L}{\partial h^{\langle t\rangle}}\Big|_{\text{read-out}}}_{dH^{\langle t\rangle}}
+\;+\; \frac{\partial L}{\partial z^{\langle t+1\rangle}}\, W_{hh}^{\top},
+\qquad
+\frac{\partial L}{\partial z^{\langle t\rangle}} = \frac{\partial L}{\partial h^{\langle t\rangle}} \odot \big(1 - (h^{\langle t\rangle})^2\big).
+$$
+
+**A weight is used at every step** — so, as for Module 03's convolution kernels, its gradient is the
+sum of its gradients at every use:
+
+$$
+\frac{\partial L}{\partial W_{xh}} = \sum_t x^{\langle t\rangle\top}\frac{\partial L}{\partial z^{\langle t\rangle}}, \qquad
+\frac{\partial L}{\partial W_{hh}} = \sum_t h^{\langle t-1\rangle\top}\frac{\partial L}{\partial z^{\langle t\rangle}}, \qquad
+\frac{\partial L}{\partial b_h} = \sum_t \sum_{\text{rows}} \frac{\partial L}{\partial z^{\langle t\rangle}}.
+$$
+
+That is all of backpropagation through time: a loop over $t$ in reverse that carries one extra
+gradient, from the future, and lets every step add its share to the shared weights.
+
+### Truncation
+
+Long texts are trained in chunks: read 64 characters, update, carry the hidden state into the next
+chunk. The state — the memory — flows on across the cut; the gradient does not. That is
+**truncated** backpropagation through time, and its truncation length $k$ is how far back any
+training signal can reach. Elman's 1990 training is the extreme case $k = 1$: the previous state
+is treated as just another input, and the gradient stops at it.
+
+### The product, and the spectral radius
+
+Follow a gradient back $k$ steps:
+
+$$
+\frac{\partial L}{\partial h^{\langle t-k\rangle}} = \frac{\partial L}{\partial h^{\langle t\rangle}}
+\prod_{j=0}^{k-1} \mathrm{diag}\big(1 - (h^{\langle t-j\rangle})^2\big)\, W_{hh}^{\top}.
+$$
+
+A feed-forward network of depth $k$ multiplies $k$ *different* Jacobians. A recurrent network
+multiplies the *same* $W_{hh}^{\top}$ again and again (the tanh slopes, all at most 1, can only shrink
+it). So the gradient behaves like a power of a matrix: roughly like $\rho^k$, where $\rho$ is
+$W_{hh}$'s **spectral radius**, the largest magnitude among its eigenvalues. Below 1 it vanishes
+geometrically; above 1 it can explode. Xavier initialization — standard deviation $1/\sqrt{n_h}$ —
+puts $\rho$ almost exactly at 1, because of a beautiful piece of random-matrix theory, the *circular
+law*: the eigenvalues of an $n \times n$ matrix of independent entries with variance $1/n$ fill the
+unit disc. But no fixed $\rho$ keeps $\rho^k$ near 1 for every $k$, and Bengio, Simard and Frasconi's
+theorem says the dynamics a network needs to *store* information robustly are the ones that make it
+vanish.
+
+### Clipping
+
+The exploding half has a cheap guard. Treat all the gradients as one long vector $g$; if its length
+exceeds a threshold $\tau$, shrink it to $\tau$:
+
+$$
+g \leftarrow g \cdot \frac{\tau}{\|g\|} \qquad \text{if } \|g\| > \tau .
+$$
+
+Same direction, shorter step. Pascanu, Mikolov and Bengio's argument for it is geometric, and the
+notebook reproduces it: a recurrent network's loss surface has *cliffs*, where a small change in the
+weights flips the long-run behaviour of the dynamics; a gradient step that lands on one is huge and
+throws the parameters far away. Clipping does nothing on ordinary steps and turns that one into an
+ordinary step.
+
+## The code: a loop that runs backwards
+
+The C library gains one file
+([`lib/c/nanograd/rnn.c`](https://github.com/shaia/deep-learning-from-scratch/blob/main/lib/c/nanograd/rnn.c))
+with the forward pass and backpropagation through time, and `ng_clip_grad_norm`. The heart of the
+backward pass is the line that decides whether the gradient from step $t+1$ reaches step $t$:
+
+```c
+for (int t = T - 1; t >= 0; t--) {
+    /* Does step t+1's gradient reach back to step t? Not past the end,
+     * and not across a truncation cut. */
+    const int flows = (t + 1 < T) && !(truncate > 0 && (t + 1) % truncate == 0);
+    for (int i = 0; i < m; i++)
+        for (int j = 0; j < n_h; j++) {
+            double s = dh_out[i * n_h + j];                       /* from the read-out */
+            if (flows)
+                for (int o = 0; o < n_h; o++)
+                    s += dz_next[i * n_h + o] * Whh[j * n_h + o];  /* from the future  */
+            dz[i * n_h + j] = s * (1.0 - h[i * n_h + j] * h[i * n_h + j]);
+        }
+    /* ...then each shared weight adds this step's share: dWxh += x^T dz, ... */
+}
+```
+
+`truncate = 1` is Elman's training; `0` is full backpropagation through time. The C program
+([`c/rnn.c`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/06-rnn/c/rnn.c))
+trains the same network both ways from the same initial weights; that one argument is the only
+difference between them.
+
+The Python layer, `nanograd.RNN`, reads the same, with one optimization the math allows: the input's
+contribution $x^{\langle t\rangle} W_{xh}$ has no dependence on the past, so all $T$ steps of it are one matrix
+product, and only the recurrence itself must be a loop:
+
+```python
+def backward(self, dH, truncate=0):
+    dh_next = np.zeros_like(self.H[0])            # nothing flows in from after T
+    for t in range(T - 1, -1, -1):
+        dh = dH[t] + dh_next                      # from the output at t, and from t+1
+        dZ[t] = dh * (1.0 - H[t] * H[t])          # back through tanh
+        if truncate and t % truncate == 0:
+            dh_next = np.zeros_like(dh_next)      # the cut: no further into the past
+        else:
+            dh_next = dZ[t] @ Whh.T               # one step further back
+    # the shared weights: every step's share, summed in one product over T*m rows
+    self.dWhh = H_prev.reshape(-1, n_h).T @ dZ.reshape(-1, n_h)
+```
+
+That `for` loop is also the recurrent network's great practical weakness. A convolution or a dense
+layer processes a whole batch in one large matrix product, which is what GPUs are built for; a
+recurrent layer must take $T$ small steps in order, each waiting for the last. Module 13's
+Transformer is, among other things, a way out of that loop.
+
+One detail of the agreement test is new. As in every module since 03, the Python side has a mirror of
+the C toy that performs every floating-point operation in the C's order, so the two can be compared
+to the last digit. A recurrent network adds a transcendental function to the loop — tanh — and NumPy
+computes its own. Measured on 200,000 random inputs, `np.tanh` differs from the C library's `tanh`
+in the last bit for **22%** of them, while Python's `math.tanh`, which calls the C library, matches
+all of them. A one-ulp difference fed through a few hundred training steps of a recurrent network is
+enough to change the printed digits, so the mirror evaluates tanh (and exp and log) through `math`.
+
+## The gradient check, and C↔Python agreement
+
+[`tests/test_agreement.py`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/06-rnn/tests/test_agreement.py)
+holds the usual three gates.
+
+**Gradients.** The recurrent layer's $\partial L/\partial X$, $\partial L/\partial h_0$ and its three weight
+gradients are finite-difference checked with an initial state (errors around $10^{-9}$), and so are
+small echo and counting networks end to end, every parameter. Truncation is checked against what it
+*means*: the truncated gradient must equal the sum of the full gradients of the chunks, each chunk
+starting from the state the previous one left, held fixed — which it does, to $10^{-15}$. Clipping is
+checked against its definition.
+
+**Agreement.** C and Python train the echo network twice — full backpropagation through time, then
+Elman's truncation, from the same weights on the same batches — for 300 Adam updates with clipping,
+and print a nine-number fingerprint per network: test loss and accuracy, the last batch loss and
+gradient norm, how often the clip fired, a checksum of all 404 parameters and three sentinel weights.
+They agree **to every printed digit**, for both. Two more lines pin the C recurrent layer (initial
+state, input gradients, truncation) and clipping to NumPy's.
+
+**Two Python paths.** The vectorized library and the C-order mirror compute the same initial loss and
+gradients for both twins to $10^{-14}$, and the same parameters after three Adam steps to
+$5 \times 10^{-15}$.
+
+## Play with it
+
+Below, a 16-unit recurrent network learns the echo task in your browser: a stream of random symbols
+from a four-letter alphabet, and at every step it must output the symbol it read $d$ steps earlier.
+You choose the delay, and how far back the training gradient is allowed to reach.
+
+<EchoWidget />
+
+Start at **d = 4** with the gradient reaching **all** the way back and press Play: within a few hundred
+updates the prediction row on the tape matches the target row exactly, on test sequences four times
+longer than anything it trains on. Now set the reach to **1 · Elman** and play again — the forward
+pass is identical, the hidden state still carries the past, and the network learns nothing, even at
+d = 1. Try reach **4** with d = 2 (learned) and d = 4 (not): it learns exactly the delays its gradient
+reaches. Finally go back to full reach and try **d = 12** and **d = 16**, and watch the gradient bars
+at the bottom right, which show how much of the last step's gradient arrives $k$ steps back. At
+initialization they fall about tenfold every eight steps; a network that succeeds holds them up out to
+roughly $k = d$. The widget's runs use a different random seed from the notebook's; the pattern is the
+same.
+
+## Watch it
+
+The chapter in about ninety seconds: a recurrent cell unrolled into a chain with one set of weights,
+a gradient shrinking as it travels back along it, the truncation staircase, the counter's state
+machine, Shakespeare's loss falling below the n-grams and its samples getting better, and Elman's
+word boundaries.
+
+<figure>
+  <video controls playsinline preload="metadata" width="720" style="max-width:100%;height:auto;border-radius:8px">
+    <source src={`${import.meta.env.BASE_URL}media/06-rnn.mp4`} type="video/mp4" />
+    Your browser does not support the video tag.
+  </video>
+  <figcaption style="font-size:0.85rem;color:var(--color-muted);margin-top:0.5rem">
+    A recurrent cell and its unrolled chain reading "hell" and predicting "ello"; a gradient pulse
+    shrinking as it travels back; the measured gradient through time at three spectral radii; the
+    echo network's accuracy against delay and gradient reach; the hidden states of a mod-3 counter
+    in clusters, one count each; Tiny Shakespeare's validation loss against n-gram baselines and samples after
+    1, 3 and 20 epochs; surprisal along a passage, peaking at the first letter of each word.
+  </figcaption>
+</figure>
+
+## Toy → real: echo, counting, then Shakespeare
+
+**The echo twins.** A stream of random symbols from `A B C D`; at every step the target is the
+symbol read four steps earlier. A 16-unit network, a fresh batch of 32 sequences of 24 steps per
+update, Adam with clipping, 300 updates — trained twice from the same weights. With full
+backpropagation through time its batch loss falls from 1.44 to 0.007, and it is perfect on test
+sequences of 96 steps, four times longer than any it trained on: the same weights do the same thing
+at every step, so the rule carries over. Elman's twin, whose gradient stops at the previous state,
+ends at 43% (chance is 25%); its loss falls from 1.44 to 1.05 in the first 75 updates, then climbs
+back to 1.24.
+The forward passes are identical. What the Elman twin lacks is the signal that says "you should
+have kept that symbol" — a signal that has to travel four steps back to reach the moment of keeping.
+
+**The staircase.** Cut the gradient every $k$ steps and train each delay $d$ for 1,500 updates:
+
+| gradient reaches back | d = 1 | 2 | 3 | 4 | 6 | 8 |
+|-----------------------|------:|--:|--:|--:|--:|--:|
+| 1 (Elman) | 0.27 | 0.27 | 0.26 | 0.29 | 0.32 | 0.28 |
+| 2 | **1.00** | 0.27 | 0.28 | 0.27 | 0.27 | 0.26 |
+| 4 | **1.00** | **1.00** | **1.00** | 0.30 | 0.26 | 0.26 |
+| 8 | **1.00** | **1.00** | **1.00** | **1.00** | **1.00** | 0.26 |
+| all | **1.00** | **1.00** | **1.00** | **1.00** | **1.00** | **1.00** |
+
+Every delay shorter than the reach is learned perfectly; every other one stays at chance — not
+partially learned, not learned slowly, not learned at all. Nothing else differs between the cells.
+**A recurrent network learns to remember only as far back as its training gradient reaches.**
+
+**The limit without truncation.** With the full gradient, on sequences of $2d + 16$ steps for 3,000
+updates, the 16-unit network echoes perfectly at 4 and 8 steps, 99.6% at 12, 84% at 16, 59% at 20,
+and nothing from 24 on. Part of that ceiling may be capacity — twenty two-bit symbols is a lot for
+sixteen tanh units — but the next measurement shows the gradient running out on its own.
+
+**The gradient through time.** Send a unit gradient into the last hidden state of a 40-step
+sequence and measure how much reaches each earlier step, at initialization, with $W_{hh}$ drawn
+Xavier-style and scaled by a gain:
+
+| gain | spectral radius | 10 steps back | 39 steps back |
+|-----:|----------------:|--------------:|--------------:|
+| 0.5 | 0.52 | $1.2 \times 10^{-4}$ | $9 \times 10^{-16}$ |
+| 1.0 (Xavier) | 1.03 | 0.065 | $1.9 \times 10^{-5}$ |
+| 1.5 | 1.55 | 0.76 | 0.43 |
+| 2.0 | 2.06 | 2.1 | 50 |
+| 3.0 | 3.10 | 8.0 | 13,700 |
+
+Below a spectral radius of about 1 the gradient vanishes geometrically; above it, it explodes. At
+Xavier's own scale it falls about tenfold every eight steps, so at the start of training a 24-step
+dependency sends back a signal a few thousandths the size of a 4-step one, buried under everything
+nearer. Training reshapes the profile: the network trained on a 12-step delay holds its gradient
+near 1 for twelve steps (0.998 at $k = 12$, against 0.037 at initialization) and then lets it fall to
+0.27 by sixteen. It learned to keep the gradient alive for as long as its task needed — but only
+as far as it could already see.
+
+**The cliff.** The exploding half, reproduced with Pascanu, Mikolov and Bengio's one-unit network:
+$h^{\langle t\rangle} = \tanh(w\,h^{\langle t-1\rangle} + b)$ for 50 steps from $h = 0.5$, loss $\frac12 (h^{\langle 50\rangle} + 0.5)^2$.
+Its loss surface over $(w, b)$ has a sharp diagonal ridge where the final state switches between the
+map's two fixed points. Gradient descent from $(w, b) = (2, 0.5)$ walks onto the ridge, receives a
+gradient hundreds of times larger than before, and takes a single step 27 units long that throws it
+to $(-9, -25)$, where the state is pinned and the loss is stuck at 0.125. The same descent with the
+gradient norm clipped at 1 crosses the ridge in steps of 0.2 and ends at a loss of $10^{-9}$. (On the
+echo toy and on Shakespeare, trained with Adam, the clip never fires: Adam already divides each step
+by a running size of the gradient.)
+
+**Counting.** The second toy reads a stream of random bits and must output, at every step, the
+number of 1s so far modulo 3. Trained on streams of 20 bits, the network is 100% correct on streams
+of 1,000 and 10,000 — and so is the same network trained with Elman's one-step truncation. Its
+16-dimensional hidden states fall into tight, separate clusters, each belonging to exactly one
+count: a finite-state machine, built out of tanh units as attractors of the dynamics, which is why
+it never drifts. It is not the minimal one. There are about a dozen clusters — the count *and the
+last two bits read*, which together account for over 95% of the state's variance, against about a
+quarter for the count alone. Nothing asked the network to be economical.
+Why can Elman's training learn a counter but not a one-step echo? In the counter **every step's
+target is the state itself**, so a one-step gradient can teach the update rule one step at a time.
+In the echo, what must be kept is not what is asked for now; it is asked for $d$ steps later, and
+only a gradient that travels $d$ steps back can say so. What matters is not how long the sequence
+is, but how far apart a piece of information and the moment it is needed are.
+
+**Tiny Shakespeare.** Then the real thing: 1,003,854 characters of training text, 111,540 of
+validation (the last 10%, unseen passages), 65 distinct characters. The baselines are n-gram models,
+which predict each character from the $n-1$ before it by counting, with add-$\alpha$ smoothing tuned on
+the validation text to flatter them:
+
+| model | validation loss (nats / char) |
+|-------|------------------------------:|
+| uniform over 65 characters | 4.174 |
+| unigram (character frequencies) | 3.347 |
+| bigram | 2.482 |
+| trigram | 2.046 |
+| 4-gram | 1.779 |
+| **5-gram (best)** | **1.750** |
+| 6-gram | 1.979 |
+| 7-gram | 2.342 |
+| **RNN, 256 hidden units, 20 epochs** | **1.654** |
+
+Counting improves with context up to four characters, then collapses: most longer contexts appear
+rarely or never in training, and a table of counts cannot generalize from one context to another.
+By ten characters, 780,165 distinct contexts occur in a million characters of text. The recurrent
+network — 99,137 parameters, one-hot input, 256 tanh units, a softmax read-out, 64-step truncated
+BPTT through 64 parallel streams with the state carried across updates, Adam, float32, twenty epochs
+and about ten minutes of NumPy — reaches **1.654 nats per character** (2.39 bits), below every n-gram.
+
+What it writes, continuing `ROMEO:` at temperature 0.8 after the first epoch, the third and the
+twentieth:
+
+```text
+ROMEO:
+Se art pith tas the ain thyour'd sillly of her math the him le peofre stes ints
+ringeres out ttretot ersande th taser the willd and the sithema-foit tak om thid
+```
+
+```text
+ROMEO:
+Sha tringer
+Wathing Jornedy?
+
+LEDWARD:
+He reas netero'd my blace,
+As anr wherture, shell out
+Wouck.
+```
+
+```text
+ROMEO:
+Madam, thou tell me after your father. Go, gnose time fear affection and vinguee;
+For that yet, at the welle's are our blows from sorrow.
+Where is thine hath the knowing humbly would speak not at Enward's noble father with
+and boningbed thy wornd. But you tell me hen.
+
+Nurse:
+Is strange of God's very arms.
+```
+
+The order is the one Karpathy described: first letter frequencies and spaces, then the *form* of a
+play — a capitalized name, a colon, a line break, short lines of verse — then mostly real words and
+the occasional real phrase. The meaning never arrives. Lower the temperature to 0.3 and the model
+plays safe and repeats itself ("the world think of bearth the world shall be…"); raise it to 1.2 and
+it coins words ("exils profom-sour 'twom out norcaly").
+
+**Elman's word boundaries, redone.** Measure the model's surprisal — the loss it pays — for every
+validation character, and average it by the character's position inside its word:
+
+| position | first letter | 2nd | 3rd | 4th | 5th | 6th+ | not a letter |
+|----------|-------------:|----:|----:|----:|----:|-----:|-------------:|
+| surprisal (nats) | **2.96** | 1.54 | 1.59 | 1.44 | 1.41 | 1.39 | 1.04 |
+
+The first letter of a word costs about twice what any later letter does. Along a passage, the word
+onsets stand up like the error peaks in Elman's figure: once a word has begun, spelling constrains
+the rest of it; which word comes next is constrained only by meaning, and that is where most of the
+model's remaining uncertainty lives.
+
+**How far back does the gradient need to reach in text?** Train the same model for three epochs with
+its gradient cut every $k$ characters inside each 64-character chunk: $k = 1$ (Elman) ends at 1.994
+nats, $k = 4$ at 1.940, $k = 16$ at 1.967 and no cut at 1.969 — a spread of 0.05, about the size of the
+difference between two seeds. It is the counter's lesson on real data. Next-character prediction is
+supervised at every step, and most of what predicts the next character — the current word's spelling,
+the last few characters — is a step or two back, where any gradient reaches. The long-range part of
+language is a small share of the loss, and it is exactly the part a plain recurrent network
+struggles to learn.
+
+The [notebook](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/06-rnn/notebook.ipynb)
+closes with the frameworks. PyTorch checks strictly: `torch.nn.RNN` given our weights returns our
+hidden states and all five gradients to $10^{-14}$ (it keeps *two* biases, a cuDNN convention — they
+are always added together, so each receives the same gradient); our truncation equals autograd with
+`.detach()` every $k$ steps; and `clip_grad_norm_` matches ours, except that it divides by
+$\|g\| + 10^{-6}$ and so lands a hair under the threshold. TensorFlow's `SimpleRNN`, trained with a
+`GradientTape` and `tf.clip_by_global_norm`, echoes four steps back on 100% of test positions. Keras
+builds the character model in six lines — an `Embedding` (the one-hot product as a lookup), a
+`SimpleRNN(256, return_sequences=True)` and a `Dense` read-out — and reaches 1.830 nats in four
+epochs of stateless 64-character windows, below the trigram. One Keras detail is worth remembering:
+`global_clipnorm` is Pascanu's rule; its neighbour `clipnorm` clips each weight matrix separately.
+
+## What it couldn't do
+
+The echo toy draws the boundary sharply. A plain recurrent network learns any dependency its
+training gradient can reach and carry back with enough signal left — and the gradient through time
+is a power of a matrix, so "enough" runs out at a distance set by the spectral radius, not by the
+amount of data or training. On Shakespeare the same limit is visible in the samples: a line holds
+together, a speaker's name is followed by a colon and verse, but nothing survives from one speech to
+the next. The model knows what the last few dozen characters looked like, not what the scene is about.
+
+Bengio, Simard and Frasconi's theorem says that tuning will not fix this. A recurrent network whose
+memories are robust to small perturbations has, necessarily, a contracting Jacobian through time —
+and a contracting Jacobian is a vanishing gradient. The fix has to change the architecture.
+
+Hochreiter and Schmidhuber's fix, in 1997, was to give the network a second kind of state: a memory
+cell that is not squashed through a tanh and multiplied by a weight matrix at every step, but *added
+to*. Its update is $c^{\langle t\rangle} = f \odot c^{\langle t-1\rangle} + i \odot g$, with learned gates deciding what to
+forget, what to write and what to read. Along $c$, the gradient is multiplied at each step by the
+forget gate — a number the network can hold near one — instead of by $W_{hh}^{\top}$ and a tanh slope. They
+called it the *constant error carousel*. It is a shortcut through time, the same idea as Module 05's
+shortcut through depth, eighteen years earlier.
+
+## Exercises & what's next
+
+1. **Elman's temporal XOR.** Feed a bit stream in which every third bit is the XOR of the two before
+   it, and train the network to predict the next bit, with `truncate=1` and with full BPTT. Plot the
+   loss by position modulo 3. Which positions become predictable, under which training — and how does
+   that square with §6's rule about what a one-step gradient can teach?
+2. **Clip or not, with SGD.** Train the echo toy with plain SGD and momentum at a high learning rate,
+   with and without `clip_grad_norm`, at delays 4 and 12. Log the gradient norm at every step. How
+   often does it spike, and what happens to the loss on the step after a spike?
+3. **Start at the identity.** Le, Jaitly and Hinton (2015) initialized a *ReLU* recurrent network with
+   $W_{hh} = I$ and $b_h = 0$, so that at the start it copies its state forward unchanged. Implement the
+   ReLU variant of `RNN` (forward and backward) and rerun the delay sweep. How far does the limit move,
+   and what does the gradient-through-time profile look like at initialization?
+4. **Orthogonal recurrence.** Draw $W_{hh}$ as a random orthogonal matrix (every eigenvalue on the unit
+   circle) instead of Xavier's. Measure the gradient through time at initialization and after training
+   on d = 16. Why does it not stay flat once training starts?
+5. **Greedy decoding.** Sample from the Shakespeare model at temperature 0.05 (nearly argmax). What
+   happens after a few lines, and why does a deterministic process with a finite state *have* to end
+   up doing that?
+6. **The cost of the loop.** Time one training update of the character model for $T$ = 16, 64 and 256
+   at a fixed number of characters per update. Which part of the time scales with $T$ and cannot be
+   batched away?
+
+Then go into the code: the self-verifying
+[`notebook.ipynb`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/06-rnn/notebook.ipynb)
+rebuilds every result above and cross-checks against PyTorch, TensorFlow and Keras, while
+[`assignment.ipynb`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/06-rnn/assignment.ipynb)
+hands you four load-bearing pieces — one step of the recurrence, the forward pass over a sequence,
+backpropagation through time with truncation, and gradient-norm clipping — to implement yourself,
+graded against finite differences and the canonical library, and finally dropped into a harness that
+must reproduce the echo twins: perfect memory with the full gradient, none with Elman's cut. All of it
+lives in [`topics/06-rnn/`](https://github.com/shaia/deep-learning-from-scratch/tree/main/topics/06-rnn).
+
+A recurrent network can carry anything forward in its state; what it cannot do is *learn* to carry
+something far, because the lesson has to travel back the same distance and fades on the way.
+
+---
+
+*Next: LSTM — gates, and a memory the gradient can travel along.*

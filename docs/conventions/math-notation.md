@@ -69,6 +69,27 @@ $H_{\text{out}} = \lfloor (H + 2P_{\text{pad}} - K)/S \rfloor + 1$ — `conv_out
 In BatchNorm, $m$ is the number of values each channel's statistics run over: the batch
 size after a Linear, batch size $\times H \times W$ after a convolution.
 
+### Recurrent networks (from Module 06)
+
+| Symbol | Code name | Meaning |
+|--------|-----------|---------|
+| $x^{\langle t\rangle}$ | `X[t]` | input at step $t$, shape $(m, n)$; a sequence is time-major, `X` of shape $(T, m, n)$ |
+| $h^{\langle t\rangle}$ | `H[t]` / `h` | hidden state after step $t$, shape $(m, n_h)$; $h^{\langle -1\rangle} = h_0$ (`h0`, zeros by default) |
+| $z^{\langle t\rangle}$ | `dZ[t]` (its gradient) | pre-activation, $x^{\langle t\rangle} W_{xh} + h^{\langle t-1\rangle} W_{hh} + b_h$ |
+| $W_{xh}, W_{hh}, b_h$ | `Wxh`, `Whh`, `bh` | input-to-hidden, hidden-to-hidden (recurrent) weights, bias — shared by every step |
+| $W_{hy}, b_y$ | `head.W`, `head.b` | the read-out applied to every step's state |
+| $T$ | `T` | sequence length (steps) |
+| $n_h$ | `n_h` | hidden units |
+| $k$ | `truncate` | truncated BPTT: the gradient's path into the past is cut every $k$ steps ($k = 1$: Elman's training; 0: full BPTT) |
+| $d$ | `delay` | the echo toy's delay: the target at step $t$ is the input at $t - d$ |
+| $\rho(W_{hh})$ | `spectral_radius` | largest eigenvalue magnitude of $W_{hh}$ |
+| $\tau$ | `max_norm` / `clip` | gradient-norm clipping threshold |
+| $V$ | `vocab` | alphabet / vocabulary size (one-hot inputs, $V$-way outputs) |
+
+The recurrence: $h^{\langle t\rangle} = \tanh(x^{\langle t\rangle} W_{xh} + h^{\langle t-1\rangle} W_{hh} + b_h)$ — row
+vectors times weight matrices, as for `Linear`. Language-model losses are in nats per character
+(divide by $\ln 2$ for bits).
+
 ## Conventions
 
 - **Vectors** lowercase ($x$, $w$); **matrices** uppercase ($X$, $W$). In code, `W` for a

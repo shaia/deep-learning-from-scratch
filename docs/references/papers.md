@@ -107,8 +107,44 @@ prehistory that leads into it. One-line summaries capture *why the paper mattere
 
 ## Era 2 — Sequences
 
-- **06 RNN** — Elman (1990), *Finding Structure in Time*; Werbos (1990), *Backpropagation
-  Through Time*.
+- **06 RNN** — Elman (1990), *Finding Structure in Time*, Cognitive Science 14(2) — the simple
+  recurrent network: context units hold a copy of the previous hidden state; trained one step
+  deep, it found word boundaries and word classes in streams of letters and words.
+  [doi:10.1207/s15516709cog1402_1](https://doi.org/10.1207/s15516709cog1402_1) · Werbos (1990),
+  *Backpropagation Through Time: What It Does and How to Do It*, Proc. IEEE 78(10) — unroll the
+  recurrence into a deep network with shared weights and backpropagate through it.
+  [doi:10.1109/5.58337](https://doi.org/10.1109/5.58337)
+  - Rumelhart, Hinton & Williams (1986), *Learning Internal Representations by Error
+    Propagation*, in *Parallel Distributed Processing*, vol. 1 — recurrent nets unfolded in time
+    into layered nets with tied weights.
+  - Jordan (1986), *Serial Order: A Parallel Distributed Processing Approach*, ICS Report 8604,
+    UC San Diego — the output fed back as state: the network Elman's simplified.
+  - Werbos (1988), *Generalization of Backpropagation with Application to a Recurrent Gas Market
+    Model*, Neural Networks 1(4) — BPTT applied, two years before the tutorial.
+    [doi:10.1016/0893-6080(88)90007-X](https://doi.org/10.1016/0893-6080(88)90007-X)
+  - Williams & Zipser (1989), *A Learning Algorithm for Continually Running Fully Recurrent
+    Neural Networks*, Neural Computation 1(2) — real-time recurrent learning: gradients carried
+    forward instead of backward. [doi:10.1162/neco.1989.1.2.270](https://doi.org/10.1162/neco.1989.1.2.270)
+  - Hochreiter (1991), *Untersuchungen zu dynamischen neuronalen Netzen*, diploma thesis, TU
+    München — the first analysis of vanishing and exploding gradients through time.
+  - Bengio, Simard & Frasconi (1994), *Learning Long-Term Dependencies with Gradient Descent is
+    Difficult*, IEEE Trans. Neural Networks 5(2) — storing information robustly forces the
+    gradient from the far past to vanish. [doi:10.1109/72.279181](https://doi.org/10.1109/72.279181)
+  - Pascanu, Mikolov & Bengio (2013), *On the Difficulty of Training Recurrent Neural Networks*,
+    ICML — exploding gradients as cliffs in the loss surface; gradient-norm clipping.
+    [arXiv:1211.5063](https://arxiv.org/abs/1211.5063)
+  - Bengio, Ducharme, Vincent & Jauvin (2003), *A Neural Probabilistic Language Model*, JMLR 3 —
+    a learned network against n-gram counts; Mikolov et al. (2010), *Recurrent Neural Network
+    Based Language Model*, Interspeech — the recurrent version.
+  - Sutskever, Martens & Hinton (2011), *Generating Text with Recurrent Neural Networks*, ICML —
+    character-level text generation with a (multiplicative) RNN, trained by Hessian-free
+    optimization.
+  - Karpathy (2015), *The Unreasonable Effectiveness of Recurrent Neural Networks* (blog) — char-rnn
+    and the Tiny Shakespeare dataset this module trains on.
+    [karpathy.github.io](https://karpathy.github.io/2015/05/21/rnn-effectiveness/)
+  - Le, Jaitly & Hinton (2015), *A Simple Way to Initialize Recurrent Networks of Rectified Linear
+    Units* — the identity-initialized ReLU RNN (an exercise here).
+    [arXiv:1504.00941](https://arxiv.org/abs/1504.00941)
 - **07 LSTM** — Hochreiter & Schmidhuber (1997), *Long Short-Term Memory* — gates that
   preserve gradients.
 - **08 RNN Regularization** — Zaremba, Sutskever & Vinyals (2014), *Recurrent Neural Network

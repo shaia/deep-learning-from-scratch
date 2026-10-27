@@ -16,7 +16,7 @@ agreement/gradient test · post builds · animation renders.
 | 03 | Convolutions / LeNet-5 | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
 | 04 | AlexNet | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
 | 05 | ResNet | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
-| 06 | RNN | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
+| 06 | RNN | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
 | 07 | LSTM | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 | 08 | RNN Regularization | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 | 09 | Seq2Seq | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
@@ -74,8 +74,15 @@ bias-free layers to `lib/*/nanograd`.*
 
 ### Era 2 — Sequences (1986–2015)
 
-**06 RNN** — *Share weights across time.* Mechanism: recurrence, BPTT.
-Toy: counting/echo. Real: char-level text. Anim: unrolling through time.
+**06 RNN** — *Share weights across time.* Mechanism: recurrence, backpropagation through time,
+truncation, gradient-norm clipping. Toy: "echo" (output the symbol from $d$ steps back — full BPTT
+against Elman's one-step truncation, from the same weights; the truncation staircase; the delay
+limit; the gradient through time against the spectral radius; Pascanu's one-unit cliff) and a
+mod-3 counter that becomes a state machine. Real: character-level Tiny Shakespeare (target val
+loss ≤ 1.70 nats/char, below every n-gram baseline), samples, Elman's word-boundary surprisal.
+Anim: unrolling through time; the gradient shrinking along the chain; the staircase; samples.
+*Adds the RNN layer (forward, BPTT with truncation) and gradient-norm clipping to
+`lib/*/nanograd`; Tiny Shakespeare to `data/`.*
 
 **07 LSTM** — *Gates that protect the gradient.* Mechanism: input/forget/output gates, cell state.
 Real: char-RNN text generation. Anim: gate values over a sequence; vanishing-gradient contrast.
