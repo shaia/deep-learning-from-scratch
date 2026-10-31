@@ -103,7 +103,10 @@ Astro URL, and record the teaser link in `ghostUrl`. Full flow: [`publishing.md`
 
 ## 7. Wire up & verify
 
-- Link the post into the site index/nav; cross-link neighbors.
+- Link the post into the site index/nav; cross-link neighbors. Post-to-post links are plain
+  root-relative markdown, `[LSTM →](/posts/07-lstm/)`; `site/astro.config.mjs` resolves them
+  under the site's `base`, so never hard-code `/deep-learning-from-scratch/`. (Media in JSX use
+  `import.meta.env.BASE_URL`.)
 - Point `topics/NN-slug/README.md` at the post and list build/run commands.
 - Run the **checks**: C runs · Python matches · agreement/gradient test passes ·
   notebook runs top-to-bottom clean, including the framework-mirrors asserts
