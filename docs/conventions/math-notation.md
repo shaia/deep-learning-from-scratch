@@ -90,6 +90,22 @@ The recurrence: $h^{\langle t\rangle} = \tanh(x^{\langle t\rangle} W_{xh} + h^{\
 vectors times weight matrices, as for `Linear`. Language-model losses are in nats per character
 (divide by $\ln 2$ for bits).
 
+### Long short-term memory (from Module 07)
+
+| Symbol | Code name | Meaning |
+|--------|-----------|---------|
+| $c^{\langle t\rangle}$ | `C[t]` | the cell after step $t$, shape $(m, n_h)$; $c^{\langle -1\rangle} = c_0$ (`c0`, zeros by default) |
+| $i, f, o$ | `G[t]` blocks 0, 1, 3 | input, forget and output gates, $\sigma(\cdot)$ of their pre-activations, in $(0, 1)$ |
+| $g$ | `G[t]` block 2 | the candidate written into the cell, $\tanh(\cdot)$ (not the clipping section's gradient vector) |
+| $z^{\langle t\rangle}$ | `dZ[t]` (its gradient) | all four pre-activations, $x^{\langle t\rangle} W_x + h^{\langle t-1\rangle} W_h + b$, blocks $[i \mid f \mid g \mid o]$ (PyTorch's order) |
+| $W_x, W_h, b$ | `Wx`, `Wh`, `b` | shapes $(n, 4n_h)$, $(n_h, 4n_h)$, $(4n_h)$ — the four gates' weights side by side |
+| $b_f$, $b_i$ | `gate_bias(f=…, i=…)` | the forget- and input-gate biases; at the start of training the cell's memory lasts about $1/(1 - \sigma(b_f))$ steps |
+| $T$ | `T` | in the latch toy, the lag: the signal at step 0, the question at step $T - 1$ |
+
+The cell: $c^{\langle t\rangle} = f \odot c^{\langle t-1\rangle} + i \odot g$, $h^{\langle t\rangle} = o \odot \tanh(c^{\langle t\rangle})$.
+`cell_only` is Hochreiter & Schmidhuber's 1997 truncated gradient: the path through $h^{\langle t-1\rangle}$
+is cut at every step, and error travels back in time only along $c$.
+
 ## Conventions
 
 - **Vectors** lowercase ($x$, $w$); **matrices** uppercase ($X$, $W$). In code, `W` for a

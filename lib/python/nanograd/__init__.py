@@ -25,6 +25,8 @@ What each module added:
         ZeroPadShortcut, GlobalAvgPool2D, bias-free Linear/Conv2D
     06  RNN (tanh recurrence, backpropagation through time, h0 carry for
         truncated BPTT), clip_grad_norm
+    07  LSTM (gates, the cell, BPTT along both paths, Hochreiter &
+        Schmidhuber's cell-only truncation, gate_bias)
 """
 
 from .augment import center_crop, random_crop_flip, ten_crop
@@ -54,6 +56,7 @@ from .layers import (
     SoftmaxCrossEntropy,
     Tanh,
 )
+from .lstm import LSTM
 from .net import Sequential, mlp
 from .norm import BatchNorm, LocalResponseNorm
 from .optim import SGD, Adam, RMSProp, clip_grad_norm
@@ -68,7 +71,7 @@ __all__ = [
     "conv_out_size",
     "LocalResponseNorm",
     "BatchNorm", "Residual", "ZeroPadShortcut", "GlobalAvgPool2D",
-    "RNN",
+    "RNN", "LSTM",
     "random_crop_flip", "center_crop", "ten_crop",
     "Sequential", "mlp",
     "SGD", "RMSProp", "Adam", "clip_grad_norm",

@@ -1,0 +1,191 @@
+---
+// Module 07's interactive: can a network hold one symbol across a long stretch of
+// noise? Four recurrent networks learn the latch task live (a signal at step 0,
+// distractors after, name the signal at the last step) while you choose the
+// network and the lag T; gate strips and a gradient-through-time chart show why.
+// Embed in MDX with:
+//   import LatchWidget from '../../components/viz/LatchWidget.astro'
+import WidgetFrame from './WidgetFrame.astro';
+---
+
+<WidgetFrame
+  title="Holding one symbol across noise"
+  caption="A small recurrent network sees one signal symbol (A, B, C or D) at step 0, then T − 1 random distractors (w, x, y, z), and must name the signal at the very last step. Start with the default, LSTM · gates open at T = 80, and press Play: within about a hundred and fifty updates it reads 100% on fresh test sequences, and the forget-gate strip stays close to 1 almost everywhere, so the cell's memory of step 0 is kept. Now pick the RNN at the same T: it never learns it, and the gradient bars on the right show why, since almost nothing reaches back 79 steps. Then try LSTM · forget bias 1, the textbook initialisation: it solves T = 10 but fails from T = 40, and its forget gate, which starts at 0.73, leaks the signal away. Return to gates open and then pick carousel only, trained with the 1997 gradient that runs along the cell alone, and compare the gradient-norm trace (second from the bottom, right): the full gradient spikes and is clipped over and over, the carousel's stays calm. Finally set T = 160."
+  alt="Left, top: the tape for one test sequence: the signal symbol at step 0 drawn large as a circle, square, triangle or diamond in its own color with its letter, a strip below it with one tick per distractor step where the tick's height shows which of w, x, y, z it is, and at the bottom the target symbol next to the network's answer, marked with a check and the word correct, or a ringed cross and the word wrong. Left, middle: a heatmap of the sixteen cells over the same sequence, green for positive values, orange for negative, blank at zero; for the RNN it shows the hidden state instead. Left, bottom: two strips of sixteen rows by T steps, the input gate and the forget gate, blank at zero and darker as they open toward one; for the RNN the panel just says there are no gates. Right, top: test accuracy against update count with a dashed line at the 25 percent chance level. Below it the training loss on a log scale with a dotted line at ln 4, then the gradient norm before clipping on a log scale with a dashed clip line at 1 and dots on the updates that were clipped. Right, bottom: a log-scale bar chart of how much gradient from the last step reaches each earlier step, from 0 to T minus 1 steps back, with a solid vertical line at the step where the signal sits; for the LSTMs a line over the bars shows the gradient along the cell."
+>
+  <div class="panels">
+    <div class="panel">
+      <div class="panel__label">tape · memory · gates</div>
+      <canvas id="latch-tape" width="420" height="132" style="max-width:100%;height:auto"></canvas>
+      <canvas id="latch-memory" width="420" height="150" style="max-width:100%;height:auto"></canvas>
+      <canvas id="latch-gates" width="420" height="214" style="max-width:100%;height:auto"></canvas>
+    </div>
+    <div class="panel">
+      <div class="panel__label">accuracy · loss · gradient norm · gradient through time</div>
+      <canvas id="latch-acc" width="420" height="130" style="max-width:100%;height:auto"></canvas>
+      <canvas id="latch-loss" width="420" height="110" style="max-width:100%;height:auto"></canvas>
+      <canvas id="latch-norm" width="420" height="120" style="max-width:100%;height:auto"></canvas>
+      <canvas id="latch-grad" width="420" height="206" style="max-width:100%;height:auto"></canvas>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="latch-play" type="button">▶ Play</button>
+    <button id="latch-step" type="button">Step</button>
+    <button id="latch-reset" type="button">Reset</button>
+  </div>
+  <div class="controls">
+    <div class="seg" role="group" aria-label="Network">
+      <span class="seg__label">network:</span>
+      <button type="button" class="seg__btn" data-net="rnn" aria-pressed="false">RNN</button>
+      <button type="button" class="seg__btn" data-net="forget1" aria-pressed="false">LSTM · forget bias 1</button>
+      <button type="button" class="seg__btn is-on" data-net="open" aria-pressed="true">LSTM · gates open</button>
+      <button type="button" class="seg__btn" data-net="carousel" aria-pressed="false">LSTM · carousel only</button>
+    </div>
+    <div class="seg" role="group" aria-label="Lag T in steps">
+      <span class="seg__label">lag T =</span>
+      <button type="button" class="seg__btn" data-lag="10" aria-pressed="false">10</button>
+      <button type="button" class="seg__btn" data-lag="20" aria-pressed="false">20</button>
+      <button type="button" class="seg__btn" data-lag="40" aria-pressed="false">40</button>
+      <button type="button" class="seg__btn is-on" data-lag="80" aria-pressed="true">80</button>
+      <button type="button" class="seg__btn" data-lag="160" aria-pressed="false">160</button>
+    </div>
+  </div>
+
+  <div id="latch-stats" class="stats mono" aria-live="polite"></div>
+</WidgetFrame>
+
+<script>
+  import { mountLatch, MAX_STEPS, type LatchStats, type NetId } from './latchCore';
+
+  const tape = document.getElementById('latch-tape') as HTMLCanvasElement | null;
+  const memory = document.getElementById('latch-memory') as HTMLCanvasElement | null;
+  const gates = document.getElementById('latch-gates') as HTMLCanvasElement | null;
+  const acc = document.getElementById('latch-acc') as HTMLCanvasElement | null;
+  const loss = document.getElementById('latch-loss') as HTMLCanvasElement | null;
+  const norm = document.getElementById('latch-norm') as HTMLCanvasElement | null;
+  const grad = document.getElementById('latch-grad') as HTMLCanvasElement | null;
+  const playBtn = document.getElementById('latch-play') as HTMLButtonElement | null;
+  const stepBtn = document.getElementById('latch-step');
+  const resetBtn = document.getElementById('latch-reset');
+  const stats = document.getElementById('latch-stats');
+  const netBtns = Array.from(document.querySelectorAll<HTMLButtonElement>('.seg__btn[data-net]'));
+  const lagBtns = Array.from(document.querySelectorAll<HTMLButtonElement>('.seg__btn[data-lag]'));
+
+  function select(btns: HTMLButtonElement[], on: HTMLButtonElement) {
+    for (const o of btns) {
+      o.classList.toggle('is-on', o === on);
+      o.setAttribute('aria-pressed', String(o === on));
+    }
+  }
+
+  if (tape && memory && gates && acc && loss && norm && grad) {
+    // Reduced motion: no autoplay; Step advances 25 updates at a time.
+    // (Read here, not from the handles: mountLatch reports stats once before
+    // it returns, so `w` does not exist yet on that first call.)
+    const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const w = mountLatch({ tape, memory, gates, acc, loss, norm, grad }, {
+      onStats(s: LatchStats) {
+        if (playBtn) {
+          playBtn.textContent = reducedMotion ? 'autoplay off'
+            : s.playing ? '⏸ Pause' : s.done ? 'done' : '▶ Play';
+          playBtn.disabled = s.done || reducedMotion;
+        }
+        if (stats) {
+          stats.innerHTML =
+            `<span>update ${s.step} / ${MAX_STEPS}</span>` +
+            `<span>${s.label}</span>` +
+            `<span>T = ${s.lag}</span>` +
+            `<span>test accuracy ${(s.acc * 100).toFixed(1)}%</span>` +
+            (s.meanForget === null ? '' : `<span>mean forget gate ${s.meanForget.toFixed(3)}</span>`) +
+            (s.solvedAt === null ? '' : `<span>solved at update ${s.solvedAt}</span>`);
+        }
+      },
+    });
+
+    playBtn?.addEventListener('click', () => w.toggle());
+    stepBtn?.addEventListener('click', () => w.step());
+    resetBtn?.addEventListener('click', () => w.reset());
+    for (const b of netBtns) {
+      b.addEventListener('click', () => {
+        w.setNet(b.dataset.net as NetId);
+        select(netBtns, b);
+      });
+    }
+    for (const b of lagBtns) {
+      b.addEventListener('click', () => {
+        w.setLag(Number(b.dataset.lag));
+        select(lagBtns, b);
+      });
+    }
+  }
+</script>
+
+<style>
+  .panels {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 0.75rem;
+    width: 100%;
+    justify-items: center;
+  }
+  .panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+    min-width: 0;
+  }
+  .panel__label {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.75rem;
+    color: var(--color-muted);
+  }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    justify-content: center;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 0.85rem;
+  }
+  .controls button {
+    padding: 0.35rem 0.9rem;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: var(--color-bg);
+    color: var(--color-text);
+    cursor: pointer;
+  }
+  .controls button:hover {
+    border-color: var(--viz-accent);
+    color: var(--viz-accent);
+  }
+  .controls button:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .seg { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center; }
+  .seg__label { color: var(--color-muted); margin-right: 0.4rem; }
+  .seg__btn { border-radius: 0 !important; }
+  .seg__btn + .seg__btn { border-left: none !important; }
+  .seg__btn:first-of-type { border-radius: 6px 0 0 6px !important; }
+  .seg__btn:last-of-type { border-radius: 0 6px 6px 0 !important; }
+  .seg__btn.is-on {
+    background: var(--viz-accent) !important;
+    color: #fff !important;
+    border-color: var(--viz-accent) !important;
+  }
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: center;
+    font-size: 0.85rem;
+    color: var(--color-muted);
+  }
+  .mono {
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  }
+</style>

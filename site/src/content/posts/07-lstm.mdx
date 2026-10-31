@@ -1,0 +1,567 @@
+---
+title: Long Short-Term Memory
+moduleNumber: 7
+description: How a memory cell that is added to, not rewritten, lets the gradient travel back through time — from Hochreiter and Schmidhuber's 1997 constant error carousel to the forget gate. A toy that measures nothing but memory, where an LSTM holds a symbol across 320 steps that Module 06's network cannot hold across 40 — but only if its cells start out open to the past and shut to new input; why the gradient along the cell can fade but never explode; and a character model of Shakespeare that edges the RNN at the same budget and grows a cell that counts along every line of verse — from scratch in C and NumPy.
+draft: false
+---
+
+import LatchWidget from '../../components/viz/LatchWidget.astro';
+
+## The constant error carousel
+
+The last chapter ended on a proof. In 1994 Yoshua Bengio, Patrice Simard and Paolo Frasconi showed
+that a recurrent network which stores information *robustly* — so that small disturbances cannot
+erase it — is exactly a network whose gradients from the distant past vanish. Learning long-range
+dependencies by gradient descent was, in the title's word, difficult, and the difficulty was not a
+matter of tuning.
+
+Sepp Hochreiter had found the vanishing gradient three years earlier, in his diploma thesis at the
+Technical University of Munich, supervised by Jürgen Schmidhuber. In 1997 the two of them published
+the way around it, in a 46-page paper in *Neural Computation* called *Long Short-Term Memory*. The
+argument starts from the arithmetic of the problem. The error flowing back through a recurrent unit
+is multiplied at every step by the unit's weight onto itself times the slope of its activation. For
+that product to stay at exactly one, step after step, the unit must be linear and its self-weight
+must be 1.0. Such a unit's state never changes on its own — whatever it holds, it keeps, and the
+error flowing back through it never shrinks or grows. They called it the **constant error carousel**.
+
+A unit that keeps everything is also a unit that can be overwritten by anything. So they put
+**gates** around it: multiplicative units, learned like any other, that decide when the cell may be
+written to and when it may be read. The gated cell could learn to latch a symbol and hold it across
+a thousand time steps of noise — a task on which, the paper reports, backpropagation through time
+and real-time recurrent learning already failed at ten.
+
+This chapter builds the LSTM in its modern form, with the forget gate that was added three years
+later, and measures what the carousel buys: a memory the gradient can travel along, a toy where an
+LSTM holds a symbol eight times further than Module 06's network ever does, and the one condition
+that toy depends on — which the 1997 paper had already spelled out, and which the customary
+initialization quietly drops.
+
+## Memory that lasts, 1991–2016
+
+The LSTM was a decade early. Its paper's experiments were small, its training algorithm was unusual,
+and for years few people outside Schmidhuber's labs in Munich and Lugano used it.
+
+The first version circulated as a technical report in 1995, and a short paper appeared at NIPS the
+next year; the full paper came in 1997. Its cell had two gates, input and output, and no way to
+forget: the carousel's self-weight was fixed at 1.0. In 1999 Felix Gers, working with Schmidhuber
+and Fred Cummins at IDSIA, found what that costs on a stream that never ends — the cell's contents
+grow without bound, because nothing ever clears them — and added a third gate, the **forget gate**,
+that lets a cell reset itself (the journal version is from 2000). Gers and Schmidhuber then added
+"peephole" connections from the cell to its gates, for tasks that need precise timing.
+
+The 1997 paper had trained the cell with a deliberately truncated gradient: error was allowed to
+flow back in time only along the carousels, never out through the gates. In 2005 Alex Graves and
+Schmidhuber trained LSTMs with the full gradient through time, and bidirectionally, on speech. A
+year later Graves and colleagues introduced connectionist temporal classification, a loss that lets
+a recurrent network label an unsegmented sequence, and in 2009 LSTMs trained with it won
+international competitions in handwriting recognition. In 2013 Graves, Abdel-rahman Mohamed and
+Geoffrey Hinton stacked them into deep networks and set a record on the TIMIT speech benchmark;
+the same year Graves had them generate text and handwriting.
+
+Then the field caught up. In 2014 Ilya Sutskever, Oriol Vinyals and Quoc Le translated English to
+French with a four-layer LSTM (Module 09). In 2015 Rafal Jozefowicz, Wojciech Zaremba and Sutskever
+searched ten thousand recurrent architectures for something better and found that the LSTM's
+remaining gap closed once its forget gate's bias was set to 1; Klaus Greff and colleagues ablated
+every part of the cell and found the forget gate and the output activation the parts that matter
+most; Andrej Karpathy, Justin Johnson and Li Fei-Fei looked inside character-level LSTMs and found
+cells that tracked quotation marks and line lengths. The same spring, Rupesh Srivastava, Greff and
+Schmidhuber turned the gates sideways — *highway networks*, the LSTM's gated shortcut run through
+depth instead of time — and in December ResNet (Module 05) showed the shortcut works without the
+gates. By 2016 LSTMs were inside Google's speech recognition and, eight layers deep, its translation
+system.
+
+| Year | Milestone | What it added |
+|------|-----------|---------------|
+| 1991 | Hochreiter | the gradient through time vanishes or explodes |
+| 1994 | Bengio, Simard & Frasconi | …and must, if memories are to be robust |
+| 1997 | Hochreiter & Schmidhuber | the constant error carousel; input and output gates |
+| 2000 | Gers, Schmidhuber & Cummins | the forget gate |
+| 2000 | Gers & Schmidhuber | peephole connections |
+| 2005 | Graves & Schmidhuber | the full gradient through time; bidirectional LSTMs |
+| 2006 | Graves et al. | connectionist temporal classification |
+| 2013 | Graves, Mohamed & Hinton | deep LSTMs for speech |
+| 2014 | Sutskever, Vinyals & Le | sequence to sequence (Module 09) |
+| 2015 | Jozefowicz, Zaremba & Sutskever; Greff et al. | forget bias 1; which parts of the cell matter |
+| 2015 | Karpathy, Johnson & Fei-Fei | interpretable cells |
+| 2015 | Srivastava, Greff & Schmidhuber | highway networks: gates through depth |
+| 2018 | Tallec & Ollivier | gates as time warping; "chrono" initialization |
+
+## The intuition: a ledger, not a rewrite
+
+Module 06's network keeps its memory the way you might keep a summary of a meeting by rewriting it,
+in full, after every sentence anyone says. Each rewrite runs the whole summary through the same
+transformation, so anything that has to survive fifty rewrites must survive fifty applications of
+the same matrix — and the blame for forgetting it has to travel back through all fifty.
+
+The LSTM keeps a **ledger** instead. Each step, three clerks act on it. One decides how much of the
+existing ledger to keep (the forget gate). One decides how much of a new entry to write (the input
+gate). One decides how much of the ledger to read out to the rest of the network (the output gate).
+The ledger itself is never transformed — only kept, added to, and read. If the keeping clerk says
+"keep everything" and the writing clerk says "write nothing", the entry made fifty steps ago is
+still there, untouched, and the route by which blame travels back to it passes through nothing but
+fifty decisions to keep. That route is the carousel.
+
+There is a catch, and this chapter spends some time on it. The clerks are trained too, and at the
+start of training they act at random. A keeping clerk who keeps three-quarters of the ledger at each
+step — which is what the customary initialization produces — has forgotten all but a millionth of
+an entry within fifty steps, and the carousel does nothing. A writing clerk who writes half of every
+passing note into the ledger fills it with noise long before anyone has learned what is worth
+keeping. Hochreiter and Schmidhuber knew both; the second has a name in their paper, *internal state
+drift*.
+
+## The math: gates, a cell, and two gradients
+
+Notation as in the notation guide: row vectors times weight matrices, rows = samples, superscript
+$\langle t\rangle$ for time.
+
+### The cell
+
+All four of the cell's inputs come from one product of the step's input and the previous hidden
+state, laid side by side in four blocks:
+
+$$
+z^{\langle t\rangle} = x^{\langle t\rangle} W_x + h^{\langle t-1\rangle} W_h + b, \qquad
+i = \sigma(z_i),\;\; f = \sigma(z_f),\;\; g = \tanh(z_g),\;\; o = \sigma(z_o).
+$$
+
+The **input gate** $i$, the **forget gate** $f$ and the **output gate** $o$ are sigmoids, numbers
+between 0 and 1; the **candidate** $g$ is what would be written. The cell keeps some of itself,
+writes some of the candidate, and shows some of itself:
+
+$$
+c^{\langle t\rangle} = f \odot c^{\langle t-1\rangle} + i \odot g, \qquad
+h^{\langle t\rangle} = o \odot \tanh\big(c^{\langle t\rangle}\big).
+$$
+
+With $i = 0$ and $f = 1$, $c^{\langle t\rangle} = c^{\langle t-1\rangle}$ exactly, whatever arrives. (The 1997 cell had
+$f = 1$ always.) Four blocks of weights instead of one: an LSTM layer has four times the parameters
+of a recurrent layer of the same width.
+
+### Backpropagation through the cell
+
+Walking backwards, a step now receives two gradients from the future — through the hidden state,
+which the next step's gates read, and through the cell, which the next step keeps:
+
+$$
+\frac{\partial L}{\partial h^{\langle t\rangle}} = dH^{\langle t\rangle} + \frac{\partial L}{\partial z^{\langle t+1\rangle}} W_h^{\top},
+\qquad
+\frac{\partial L}{\partial c^{\langle t\rangle}} = \frac{\partial L}{\partial c^{\langle t+1\rangle}} \odot f^{\langle t+1\rangle}
++ \frac{\partial L}{\partial h^{\langle t\rangle}} \odot o \odot \big(1 - \tanh^2 c^{\langle t\rangle}\big).
+$$
+
+The product rule then gives each block its share, $dz_i = dc\,g\,i(1-i)$, $dz_f = dc\,c^{\langle t-1\rangle} f(1-f)$,
+$dz_g = dc\,i\,(1-g^2)$, $dz_o = dh\,\tanh(c)\,o(1-o)$, and the shared weights sum their shares over
+every step, exactly as in Module 06.
+
+The second equation is the chapter. Along the cell, one step back multiplies the gradient by $f$ —
+not by a weight matrix, not by an activation's slope, but by a number between 0 and 1 that the
+network sets for itself, per unit and per step. Follow it back $k$ steps:
+
+$$
+\frac{\partial L}{\partial c^{\langle t-k\rangle}} \supset \frac{\partial L}{\partial c^{\langle t\rangle}} \odot \prod_{j=0}^{k-1} f^{\langle t-j\rangle}.
+$$
+
+Module 06's gradient was a power of a matrix, and only a spectral radius of exactly one could keep a
+power from vanishing or exploding. This one is a product of gates. If they are near one, it travels;
+if they are smaller, it fades; and — since every factor is at most one — along the cell it can
+*never* explode.
+
+### The 1997 gradient
+
+Hochreiter and Schmidhuber did not use the full gradient. Their algorithm truncated it wherever error
+"wants" to leave a memory cell or a gate: the $W_h^{\top}$ term above was dropped at every step, and
+error travelled back in time only along the carousel. It was cheap — it needs no stored history of
+the sequence — and, the paper argued, it lost little, because outside the carousels the error decays
+quickly anyway. In nanograd this is `backward(dH, cell_only=True)`; it is exactly the gradient of a
+network whose gates read a *frozen copy* of $h^{\langle t-1\rangle}$, which is how the test suite checks it.
+
+### The gate biases
+
+At the start of training every gate is roughly the sigmoid of its bias. So the forget gate's bias
+$b_f$ decides how much of the cell — and of the gradient along it — survives each step before the
+network has learned anything, and the cell's memory initially lasts about
+
+$$
+\frac{1}{1 - \sigma(b_f)} = 1 + e^{b_f} \text{ steps:} \qquad 2 \text{ at } b_f = 0,\quad 3.7 \text{ at } b_f = 1,\quad 149 \text{ at } b_f = 5.
+$$
+
+A bias of 1 is the customary choice — the one Jozefowicz and colleagues found closes the LSTM's gap,
+and the one Keras uses by default. The input gate's bias $b_i$ decides how much of every
+passing input the cell collects while it waits. Hochreiter and Schmidhuber's remedy for internal
+state drift was "initially to bias the input gate toward zero."
+
+## The code: one more gradient from the future
+
+The C library gains one file
+([`lib/c/nanograd/lstm.c`](https://github.com/shaia/deep-learning-from-scratch/blob/main/lib/c/nanograd/lstm.c)).
+The heart of its backward pass carries both gradients from step $t+1$, and the `cell_only` flag cuts
+one of them:
+
+```c
+for (int i = 0; i < m; i++)
+    for (int j = 0; j < n_h; j++) {
+        double dh = dh_out[i * n_h + j];                         /* from the read-out   */
+        if (flows && !cell_only)
+            for (int o = 0; o < n4; o++)
+                dh += dz_next[i * n4 + o] * Wh[j * n4 + o];      /* via the next gates  */
+        const double tc = tanh(c[i * n_h + j]);
+        double d = dh * go * (1.0 - tc * tc);                    /* via h<t>            */
+        if (flows)
+            d += dc_next[i * n_h + j] * g_next[i * n4 + n_h + j];  /* along the cell    */
+        dc[i * n_h + j] = d;
+        dz[i * n4 + j]           = d * gg * (gi * (1.0 - gi));   /* input gate  */
+        dz[i * n4 + n_h + j]     = d * cpv * (gf * (1.0 - gf));  /* forget gate */
+        dz[i * n4 + 2 * n_h + j] = d * gi * (1.0 - gg * gg);     /* candidate   */
+        dz[i * n4 + 3 * n_h + j] = dh * tc * (go * (1.0 - go));  /* output gate */
+    }
+```
+
+The Python layer, `nanograd.LSTM`, is the same loop over time with the gates vectorized:
+
+```python
+for t in range(T - 1, -1, -1):
+    dh = dH[t] + dh_next                          # from the output at t, and from t+1
+    dc = dc_next + dh * o * (1.0 - TC[t] ** 2)    # along the carousel, and via h<t>
+    dZ[t] = [dc * g * i * (1 - i), dc * c_prev * f * (1 - f),
+             dc * i * (1 - g * g), dh * TC[t] * o * (1 - o)]   # four blocks
+    dc_next = dc * f                              # one step back along the cell
+    dh_next = 0 if cell_only else dZ[t] @ Wh.T    # ...and along h, unless cut
+```
+
+The C program
+([`c/lstm.c`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/07-lstm/c/lstm.c))
+trains four networks on the toy below from the same seeds, and is the bit-exact gate for all of
+this.
+
+## The gradient check, and C↔Python agreement
+
+[`tests/test_agreement.py`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/07-lstm/tests/test_agreement.py)
+holds the usual three gates.
+
+**Gradients.** The LSTM layer's $\partial L/\partial X$, $\partial L/\partial h_0$, $\partial L/\partial c_0$ and its three
+weight gradients are finite-difference checked with an initial state and cell (errors around
+$10^{-9}$). Truncation is checked against what it means — the sum of the full gradients of the
+chunks, each starting from the state *and cell* the previous chunk left — to $4 \times 10^{-16}$. The
+1997 gradient is checked against what *it* means: finite differences of the network whose gates
+read a frozen $h^{\langle t-1\rangle}$, to $10^{-8}$. A small latch network and a small character model are
+checked end to end, every parameter — compared as whole vectors, because an LSTM's gradient entries
+span six orders of magnitude (an early step's share is scaled by every forget gate after it) and
+finite differences resolve an entry only to about $10^{-11}$.
+
+**Agreement.** C and Python train four networks on the latch for 300 Adam updates with clipping —
+Module 06's RNN, an LSTM, the same LSTM with the 1997 gradient, and the same weights with the
+textbook biases — and print a ten-number fingerprint for each: test loss, accuracy on sequences of
+the training length and four times longer, the last batch loss and gradient norm, how often the clip
+fired, a parameter checksum and three sentinel weights. They agree **to every printed digit**, for
+all four, and a fifth line pins the C layer (initial state and cell, input gradients, truncation,
+the 1997 gradient) to NumPy's. As in Module 06, the Python mirror evaluates `exp` and `tanh` through
+the C library (Python's `math`), and its sigmoid uses the C's own two-branch formula.
+
+**Two Python paths.** The vectorized library and the C-order mirror compute the same initial loss
+and gradients for every twin to about $10^{-12}$, and the same parameters after three Adam steps to
+about $10^{-13}$.
+
+## Play with it
+
+Below, a 16-unit network learns the latch in your browser: a signal — one of four shapes — at the
+first step, then a strip of distractors, and at the end the question of which signal came first. You
+choose the network and the lag $T$.
+
+<LatchWidget />
+
+Start with the default — an LSTM whose gates start open to the past and shut to new input, at
+$T = 80$ — and press Play: within about a hundred and fifty updates it answers every test sequence,
+and the forget-gate strip is a nearly solid band near 1. Switch to the **RNN** at the same lag: the forward
+pass is perfectly able to carry a symbol eighty steps, and the network never learns to; watch the
+gradient bars fall away to nothing long before they reach the signal. Now the **LSTM with forget
+bias 1**: its forget gates start at 0.73 — a cell that leaks a quarter of itself every step — and the
+result is the RNN's. Try the **carousel only** and watch the gradient-norm panel — the full-gradient LSTM's
+trace spikes past the clipping line as it finds the solution; the carousel's barely moves. Finally
+push the open LSTM to $T = 160$. The widget's runs use their own random seed; the pattern is the
+notebook's.
+
+## Watch it
+
+The chapter in about ninety seconds: the gradient fading through Module 06's network, the cell built
+piece by piece, a cell holding four values flat while a recurrent unit merges them, the gradient
+riding the carousel, the latch against the lag, the gate biases, the full gradient spiking while the
+carousel stays calm, the trained cell amplifying a whisper, and Shakespeare — the two models' losses,
+how far back each looks, and a cell that counts along each line.
+
+<figure>
+  <video controls playsinline preload="metadata" width="720" style="max-width:100%;height:auto;border-radius:8px">
+    <source src={`${import.meta.env.BASE_URL}media/07-lstm.mp4`} type="video/mp4" />
+    Your browser does not support the video tag.
+  </video>
+  <figcaption style="font-size:0.85rem;color:var(--color-muted);margin-top:0.5rem">
+    Module 06's gradient through time falling to a few millionths 79 steps back; the LSTM cell as a
+    belt with a forget gate and a write on it; four values held flat in a cell for 200 steps while an
+    RNN unit merges them into two; gradient profiles along the cell for two forget biases against the
+    RNN's; test accuracy against the lag for the RNN and the LSTM; the gate-bias table; gradient norms
+    of the full and the carousel-only gradient against the clipping line; one trained cell fanning
+    out by signal; Tiny Shakespeare's validation loss for both models, loss against context length,
+    and a cell's sawtooth over a passage of verse.
+  </figcaption>
+</figure>
+
+## Toy → real: the latch, then Shakespeare
+
+**The latch.** Module 06's echo asked a network to hold $d$ symbols at once, so its limit mixed two
+things: how far back the gradient reaches, and how much sixteen units can hold. This toy removes the
+second. A signal, one of `A B C D`, arrives at step 0; then $T - 1$ distractors from `w x y z`; at the
+last step the network must say which signal it saw. Two bits, whatever $T$ is — but the only error
+signal is at the end, and the moment of keeping is at the start. Bengio, Simard and Frasconi called
+the ability *information latching*; in miniature, it is task 2c of the 1997 paper.
+
+**Four twins.** At $T = 80$, sixteen units, a fresh batch of 32 sequences per update, Adam with
+clipping, 300 updates, the same batches for all four:
+
+| twin | network | gate biases (input, forget) | gradient | accuracy, $T = 80$ | at $T = 320$ | clipped |
+|------|---------|----------------------------|----------|------:|------:|----:|
+| `rnn` | Module 06's RNN | — | full | 0.25 | 0.25 | 4 |
+| `forget1` | LSTM | 0, **1** (textbook) | full | 0.27 | 0.20 | 0 |
+| `lstm` | LSTM, same weights | **−5, +5** | full | **1.00** | 0.77 | 45 |
+| `carousel` | LSTM, same weights | −5, +5 | **cell only** | **1.00** | **1.00** | 2 |
+
+The RNN and the textbook LSTM end at chance (25%). The LSTM whose cells start open to the past
+($\sigma(5) = 0.993$) and shut to new input ($\sigma(-5) = 0.007$) learns the task — and so does its twin
+whose error never travels back through $h$ at all: everything that taught step 0 to keep its symbol
+rode the cell, 79 steps. The forward passes of the three LSTMs differ in one line of initialization
+or not at all.
+
+**How long a lag?** Across lags, three seeds each, up to 1,000 updates:
+
+| lag $T$ | 10 | 20 | 40 | 80 | 160 | 320 |
+|---------|---:|---:|---:|---:|----:|----:|
+| RNN | 1.00 1.00 1.00 | 1.00 0.49 1.00 | 0.48 0.73 0.44 | 0.78 0.26 0.48 | 1.00 0.25 0.26 | 0.24 0.43 0.79 |
+| LSTM, gates open | **1.00** ×3 | **1.00** ×3 | **1.00** ×3 | **1.00** ×3 | **1.00** ×3 | **1.00** ×3 |
+
+The RNN holds the signal across ten steps every time and across twenty two times in three; from
+forty on, one run in twelve gets there. In the rest it often gets partway — 44% to 79% — telling two
+or three of the four signals apart. The notebook shows why with a picture: write four values into a
+recurrent unit with $h = \tanh(2h + \ldots)$ and they fall onto its two attractors, A and B onto one, C
+and D onto the other — a robust memory of one bit. Written into an LSTM cell with its input gate shut
+and its forget gate open, all four stay where they were put for 200 steps. The LSTM solves all
+eighteen runs, at every lag up to 320, in 100 to 360 updates.
+
+**Why: the gradient through time.** Send a unit gradient into the last state of 80-step sequences
+and measure how much reaches the *input* $k$ steps back — a measure that means the same thing for
+both architectures — and, for the LSTMs, how much rides the cell. At initialization, relative to the
+last step:
+
+| | $k = 10$ | $k = 40$ | $k = 79$ (the signal) |
+|-|---------:|---------:|---------:|
+| RNN (Xavier) | 0.15 | $1.2 \times 10^{-3}$ | $3.4 \times 10^{-6}$ |
+| LSTM, forget bias 1 — input | 0.19 | $6.4 \times 10^{-3}$ | $8.6 \times 10^{-5}$ |
+| LSTM, forget bias 1 — along the cell | 0.21 | $8.3 \times 10^{-3}$ | $1.1 \times 10^{-4}$ |
+| LSTM, gates open — input | 0.19 | 0.15 | **0.11** |
+| LSTM, gates open — along the cell | 0.93 | 0.75 | **0.59** |
+
+With a forget bias of 1 the carousel leaks a quarter of the gradient at every step, and the textbook
+LSTM is barely better than the RNN. With the gates open the product of forget gates is
+$\sigma(5)^{79} = 0.59$, and a tenth of the last step's gradient reaches the signal. The forward pass,
+remember, could carry the symbol in all three.
+
+**Two biases, two jobs.** The forget bias sets the cell's initial memory, $1 + e^{b_f}$ steps; the
+input bias keeps the cell from collecting noise while it waits. Measured at initialization with a
+forget bias of 5 and the latch's distractors streaming in: with an input bias of 0, the mean $|c|$
+grows from 0.15 after one step to 5.8 after 80 and 14.8 after 320 — the cell is mostly the sum of the
+distractors, and $\tanh$ has saturated ($1 - \tanh^2 c = 0.11$); with an input bias of −5 it stays at 0.1,
+and the slope at 0.98. On the latch, two seeds each, first one knob — $b_f = b$, $b_i = -b$, the pairing
+Tallec and Ollivier's "chrono" initialization uses — then the input bias alone at $T = 320$:
+
+| $b_f = b,\ b_i = -b$ | memory at init | $T = 20$ | $T = 80$ | $T = 320$ |
+|----------------------|---------------:|------:|------:|------:|
+| $b = 0$ | 2 steps | 0.21 0.27 | 0.30 0.27 | 0.24 0.24 |
+| $b = 1$ | 3.7 | **1.00 1.00** | 0.29 0.27 | 0.28 0.24 |
+| $b = 2$ | 8.4 | **1.00 1.00** | 0.25 0.25 | 0.27 0.24 |
+| $b = 3$ | 21 | **1.00 1.00** | **1.00 1.00** | 0.24 0.24 |
+| $b = 5$ | 149 | **1.00 1.00** | **1.00 1.00** | **1.00 1.00** |
+| $b = 7$ | 1,098 | **1.00 1.00** | **1.00 1.00** | **1.00 1.00** |
+
+| $b_f = 5$, $T = 320$ | $b_i = 0$ | $-1$ | $-2$ | $-3$ | $-5$ |
+|----------------------|------:|-----:|-----:|-----:|-----:|
+| accuracy (two seeds) | 0.77 0.24 | 0.24 0.24 | 0.44 0.24 | **1.00 1.00** | **1.00 1.00** |
+
+Each row learns lags up to a few times its initial memory, and none beyond. And a forget gate held
+open is not enough on its own at $T = 320$: the input gate must start nearly shut too. Both are the
+1997 design. Its cell could not forget at all, and its paper prescribed biasing the input gates
+toward zero; the customary forget bias of 1 keeps neither.
+
+**The carousel alone — and why it cannot explode.** Eight seeds, both gradients, 300 updates each
+at $T = 80$:
+
+| | solved | mean update | accuracy at $4T$ | clipped updates (per seed) | largest $\|g\|$ |
+|-|-------:|------------:|------:|----------------|------:|
+| full BPTT | 8 / 8 | 119 | 0.97 | 27, 12, 11, 16, 12, 13, 11, 11 | 46.3 |
+| cell only (1997) | 8 / 8 | 119 | **1.00** | 7, 0, 0, 2, 0, 0, 0, 0 | **1.5** |
+
+The two learn equally fast. But the full gradient spikes past the clipping threshold a dozen times
+or more in every run — up to 46 times the threshold — while the cell-only gradient almost never
+needs clipping. The carousel's equation says why: along the cell the gradient is multiplied by
+forget gates between 0 and 1, so it can fade but it cannot grow. Every spike comes through the $h$
+path, $dz^{\langle t+1\rangle} W_h^{\top}$ — a recurrent network's product of matrices, with all of Module 06's
+cliffs. Hochreiter and Schmidhuber's truncation removed exactly the part of the gradient that can
+blow up and kept the part that carries the memory. (Graves and Schmidhuber returned to the full
+gradient in 2005, and every framework computes it today — with clipping.)
+
+**Inside the trained latch.** Not the textbook picture. The input gate never opens at the signal —
+it is *lower* there (0.028) than at the distractors (0.081) — so step 0 leaves only a faint mark in the
+cell, a few hundredths. The forget gate stays near 1 (0.984 on average), so the mark survives; and
+after twenty-odd steps each step writes a little more in the direction of what is already stored. In
+the cell that best separates the signals, A and B fan out in opposite directions while C and D stay
+near zero (other cells split those two), and the mark grows sixtyfold by step 79, to where the
+read-out can use it. A memory that is kept, then amplified; gradient descent finds whatever works.
+The same amplifier runs backwards: in the trained network the gradient reaching the signal is
+*larger* than the last step's.
+
+**Tiny Shakespeare.** Module 06's character model, with the RNN swapped for an LSTM sized to the same
+parameter budget — 122 cells give 99,739 parameters against the RNN's 99,137 — and the customary
+forget bias of 1 (text gives an error signal at every step; nothing has to be carried blind). Module
+06 trained its RNN at a learning rate of $2 \times 10^{-3}$, and at that rate the LSTM *loses*. An
+architecture compared at another one's learning rate is not compared fairly, so both were trained at
+five:
+
+| validation loss (nats/char) | $2 \times 10^{-3}$ | $4 \times 10^{-3}$ | $8 \times 10^{-3}$ | $1.6 \times 10^{-2}$ | $3.2 \times 10^{-2}$ |
+|------------------|------:|------:|------:|------:|------:|
+| RNN, 256 units | 1.654 | **1.644** | 1.769 | 2.291 | 3.370 |
+| LSTM, 122 cells | 1.724 | 1.656 | 1.624 | **1.620** | 1.667 |
+
+Each at its best, the LSTM wins: **1.620 nats per character** (2.34 bits) against 1.644 — 0.024 at
+the same budget. The two want very different steps: the RNN stalls at $1.6 \times 10^{-2}$ and learns
+nothing at $3.2 \times 10^{-2}$, where the LSTM is within 0.05 of its best. (An LSTM as wide as the RNN —
+256 cells, 346,433 parameters — reaches 1.582 even at Module 06's rate.) Both fit their training text
+far better than the validation text; the LSTM's training loss ends near 1.36.
+
+Its samples, continuing `ROMEO:` at temperature 0.8 after the first epoch, the third and the
+twentieth:
+
+```text
+ROMEO:
+Thae, prown thing fold priyting and my'll of the spasce my all not what.
+Whatited my prockis try would undes prat
+```
+
+```text
+ROMEO:
+Sicch. Thou tanesh hand; atter, and my grace the spenan;
+That I do your honoust thee son out
+Would thence it so raplobs for her before it, but belass.
+
+BUCKINGHAM:
+There hraming, speak doth condse sumband our pardon this;
+```
+
+```text
+ROMEO:
+Reacher or Claudio images your hands, when he's a seried
+What and eye to what, in the purpose: were he?
+
+KING RICHARD III:
+No, call the streign no sought it:
+The knownest your nurse but my lambaticly,
+And such a breathest best be so, and nor sleep;
+```
+
+By ear, much like Module 06's: 0.024 nats per character is not a difference you hear. Two
+measurements show where it lives.
+
+**How far back does each model look?** Start each from the zero state $L$ characters before a
+position of the validation text, let it read them, and score its prediction of the next character,
+averaged over 4,096 positions:
+
+| context $L$ | 4 | 8 | 16 | 32 | 64 | 128 | 512 |
+|-------------|--:|--:|---:|---:|---:|----:|----:|
+| RNN | 2.235 | 1.720 | **1.631** | 1.631 | 1.631 | 1.631 | 1.631 |
+| LSTM | 2.697 | 1.825 | 1.656 | 1.618 | **1.603** | 1.604 | 1.604 |
+
+The RNN's prediction stops improving after 16 characters; nothing it read further back changes its
+guess. The LSTM's keeps improving out to 64 — and stops there, at the length of the window it was
+trained through: the gradient that taught it never reached further. Those 48 characters are its
+advantage. (Started cold, the LSTM is worse with sixteen characters of context or fewer; its cells normally
+hold values far from zero, and the zero state is one it rarely saw in training.)
+
+**A cell that counts.** Karpathy, Johnson and Fei-Fei found character-level LSTM cells with jobs —
+one turned on inside quotation marks, one tracked the position in the line. Tiny Shakespeare's lines
+are verse, a few dozen characters each. For every validation character take the number of
+characters since the last newline, and ask how well the network's state tracks it. One cell,
+number 11, correlates at +0.79 on its own, and a linear read-out of all 122 cells recovers the
+position in the line with $R^2 = 0.81$; from the RNN's 256 units, $R^2 = 0.36$, and its best single unit
+manages 0.35. Over a passage the cell is a sawtooth: every newline knocks it down to about −3, and it
+climbs back toward zero, character by character, until the next one. Its forget gate stays near 1
+inside a line (0.93 on average) and dips at newlines (0.75) — deepest at the speaker names, where one
+speech ends and another begins. Counting is what an additive cell does naturally: hold $f$ near 1 and
+add a little at every step. A unit squashed through $\tanh$ at every step does it badly.
+
+The [notebook](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/07-lstm/notebook.ipynb)
+closes with the frameworks. PyTorch checks strictly: `torch.nn.LSTM` given our weights — its gate
+blocks are in our order, $i, f, g, o$, and it keeps two biases that are always added together — returns
+our states, our last cell and all of our gradients, including $\partial L/\partial c_0$, to $3 \times 10^{-14}$;
+our truncation equals `.detach()` on $(h, c)$ every $k$ steps; and the 1997 gradient is one more
+`.detach()`, on the $h^{\langle t-1\rangle}$ the gates read, to $2 \times 10^{-14}$. TensorFlow's `LSTM` on the
+latch at $T = 80$ makes the chapter's point in one line each: with Keras's default biases (it adds 1
+to the forget gate's) it ends at 25%; with a `Constant` bias initializer of −5 for the input gate and
++5 for the forget gate, at 100%. And Keras builds a character LSTM at the same budget — an
+`Embedding`, an `LSTM(128, return_sequences=True)`, a `Dense` — that reaches 1.732 nats in four epochs
+of stateless 64-character windows.
+
+## What it couldn't do
+
+The LSTM did not repeal Module 06's lesson; it changed what limits it. A network still learns only
+what its training gradient reaches — truncate it at 64 characters and the LSTM's use of context
+stops at 64 — but along the cell the gradient no longer has to fight a power of a matrix, so it
+reaches as far as the forget gates let it. That condition is the chapter's other lesson. The
+carousel works only if the cell starts out remembering, and the customary initialization does not
+start it there: the 1997 cell, which could not forget, and its paper's input gates biased shut were
+not incidental.
+
+The cost did not go away either. An LSTM step is four recurrent steps' worth of arithmetic, and it
+is still a step: the loop over time runs in order, each step waiting for the last. On text at this
+scale the gain was real but modest — most of what predicts the next character is in the last few —
+and both models fit their training text far better than text they had not seen.
+
+Simpler gated cells followed. Kyunghyun Cho and colleagues' *gated recurrent unit* (2014) merges the
+cell into the state and the input and forget gates into one "update" gate; Greff's ablations and
+Jozefowicz's search found it about as good. Both keep the essential thing: a state that is
+interpolated, not rewritten.
+
+## Exercises & what's next
+
+1. **A gated recurrent unit.** Implement Cho et al.'s GRU — $h^{\langle t\rangle} = (1-u) \odot h^{\langle t-1\rangle} + u \odot \tilde h$
+   with an update gate $u$ and a reset gate inside $\tilde h$ — forward and backward, gradient-checked,
+   and run the latch sweep. Which bias plays the role of the forget bias, and what value does the
+   latch need?
+2. **The 1997 cell.** Remove the forget gate ($f \equiv 1$) and train the latch with input bias −5. Then
+   feed it one continuous stream with signals at random times and a question after each — no resets
+   between episodes. Plot $|c|$ over a few thousand steps. What did Gers, Schmidhuber and Cummins add,
+   and why?
+3. **Chrono initialization.** Draw each cell's forget bias as $\log u$, $u$ uniform on $[1, T_{\max} - 1]$,
+   with $b_i = -b_f$ (Tallec and Ollivier 2018), and rerun the bias table with $T_{\max} = 320$. Does a
+   spread of memory lengths beat a single bias at short lags, long lags, or both?
+4. **Does the carousel amplify?** Train the latch with `cell_only=True` and repeat the "inside the
+   trained latch" analysis. Does the cell-only network amplify its mark through $h$ the same way —
+   and if it does, how did it learn to, when no gradient flows along $h$?
+5. **A longer window.** Train the character LSTM with a 256-character window (16 streams instead of
+   64, so each update still sees 4,096 characters) and redo the context curve. Does the plateau move
+   from 64 to 256? Does the RNN's, from 16?
+6. **Find another cell.** Search the trained character model's cells for one that tracks something
+   else — being inside a speaker's name, the parity of a line, the distance since the last period.
+   Correlation finds a cell; what experiment would show the model *uses* it?
+
+Then go into the code: the self-verifying
+[`notebook.ipynb`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/07-lstm/notebook.ipynb)
+rebuilds every result above and cross-checks against PyTorch, TensorFlow and Keras, while
+[`assignment.ipynb`](https://github.com/shaia/deep-learning-from-scratch/blob/main/topics/07-lstm/assignment.ipynb)
+hands you four load-bearing pieces — one step of the cell, the forward pass over a sequence,
+backpropagation through time along both paths with the 1997 gradient as an option, and the gate
+biases — to implement yourself, graded against finite differences and the canonical library, and
+finally dropped into a harness that must reproduce the latch: a symbol held through 79 distractors
+with the gates open, none with the textbook biases, and the carousel alone enough. All of it lives in
+[`topics/07-lstm/`](https://github.com/shaia/deep-learning-from-scratch/tree/main/topics/07-lstm).
+
+A recurrent network's memory is a state it must rebuild at every step; an LSTM's is a cell it is
+allowed to leave alone. The gradient travels along whatever is left alone.
+
+---
+
+*Next: RNN regularization — dropout for recurrent networks, without erasing the memory.*

@@ -145,8 +145,41 @@ prehistory that leads into it. One-line summaries capture *why the paper mattere
   - Le, Jaitly & Hinton (2015), *A Simple Way to Initialize Recurrent Networks of Rectified Linear
     Units* — the identity-initialized ReLU RNN (an exercise here).
     [arXiv:1504.00941](https://arxiv.org/abs/1504.00941)
-- **07 LSTM** — Hochreiter & Schmidhuber (1997), *Long Short-Term Memory* — gates that
-  preserve gradients.
+- **07 LSTM** — Hochreiter & Schmidhuber (1997), *Long Short-Term Memory*, Neural Computation
+  9(8) — the constant error carousel: a memory cell with a linear self-connection of weight 1.0,
+  guarded by multiplicative input and output gates; trained with a truncated gradient that lets
+  error flow back in time only inside the cells; input gates biased toward zero against "internal
+  state drift" (§4.8); lags of over 1000 steps (task 2c), where BPTT and RTRL already failed at 10.
+  [doi:10.1162/neco.1997.9.8.1735](https://doi.org/10.1162/neco.1997.9.8.1735)
+  - Hochreiter & Schmidhuber (1995), *Long Short Term Memory*, Technical Report FKI-207-95, TU
+    München — the first version.
+  - Gers, Schmidhuber & Cummins (2000), *Learning to Forget: Continual Prediction with LSTM*,
+    Neural Computation 12(10) — the forget gate: a cell that can reset itself, for streams that are
+    not cut into sequences. [doi:10.1162/089976600300015015](https://doi.org/10.1162/089976600300015015)
+  - Gers & Schmidhuber (2000), *Recurrent Nets that Time and Count*, IJCNN — peephole connections
+    from the cell to its gates.
+  - Graves & Schmidhuber (2005), *Framewise Phoneme Classification with Bidirectional LSTM and
+    Other Neural Network Architectures*, Neural Networks 18(5–6) — the LSTM trained with the full
+    gradient through time. [doi:10.1016/j.neunet.2005.06.042](https://doi.org/10.1016/j.neunet.2005.06.042)
+  - Graves, Mohamed & Hinton (2013), *Speech Recognition with Deep Recurrent Neural Networks*,
+    ICASSP — deep LSTMs on TIMIT. [arXiv:1303.5778](https://arxiv.org/abs/1303.5778) · Graves
+    (2013), *Generating Sequences With Recurrent Neural Networks* — LSTM text and handwriting.
+    [arXiv:1308.0850](https://arxiv.org/abs/1308.0850)
+  - Jozefowicz, Zaremba & Sutskever (2015), *An Empirical Exploration of Recurrent Network
+    Architectures*, ICML — ten thousand architectures; a forget-gate bias of 1 closes most of the
+    LSTM's gap. [PMLR 37](https://proceedings.mlr.press/v37/jozefowicz15.html)
+  - Greff, Srivastava, Koutník, Steunebrink & Schmidhuber (2017), *LSTM: A Search Space Odyssey*,
+    IEEE TNNLS 28(10) — eight variants ablated; the forget gate and the output activation matter
+    most. [arXiv:1503.04069](https://arxiv.org/abs/1503.04069)
+  - Karpathy, Johnson & Fei-Fei (2015), *Visualizing and Understanding Recurrent Networks* —
+    character-level LSTMs, GRUs and RNNs compared; cells that track quotes and line length.
+    [arXiv:1506.02078](https://arxiv.org/abs/1506.02078)
+  - Srivastava, Greff & Schmidhuber (2015), *Highway Networks* — the LSTM's gates turned
+    sideways, through depth; ResNet (Module 05) is the gateless case.
+    [arXiv:1505.00387](https://arxiv.org/abs/1505.00387)
+  - Tallec & Ollivier (2018), *Can Recurrent Neural Networks Warp Time?*, ICLR — gates as time
+    warping; "chrono" initialization, forget bias $\log U(1, T_{\max}-1)$ and input bias its
+    negative. [arXiv:1804.11188](https://arxiv.org/abs/1804.11188)
 - **08 RNN Regularization** — Zaremba, Sutskever & Vinyals (2014), *Recurrent Neural Network
   Regularization* — how to apply dropout in RNNs.
 - **09 Seq2Seq** — Sutskever, Vinyals & Le (2014), *Sequence to Sequence Learning with Neural

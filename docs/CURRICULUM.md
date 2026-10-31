@@ -17,7 +17,7 @@ agreement/gradient test · post builds · animation renders.
 | 04 | AlexNet | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
 | 05 | ResNet | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
 | 06 | RNN | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
-| 07 | LSTM | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
+| 07 | LSTM | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ | ☑ |
 | 08 | RNN Regularization | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 | 09 | Seq2Seq | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
 | 10 | Attention | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ | ☐ |
@@ -84,8 +84,18 @@ Anim: unrolling through time; the gradient shrinking along the chain; the stairc
 *Adds the RNN layer (forward, BPTT with truncation) and gradient-norm clipping to
 `lib/*/nanograd`; Tiny Shakespeare to `data/`.*
 
-**07 LSTM** — *Gates that protect the gradient.* Mechanism: input/forget/output gates, cell state.
-Real: char-RNN text generation. Anim: gate values over a sequence; vanishing-gradient contrast.
+**07 LSTM** — *Gates that protect the gradient.* Mechanism: input/forget/output gates, the additive
+cell (the constant error carousel), BPTT along both paths, Hochreiter & Schmidhuber's cell-only
+gradient, gate-bias initialization. Toy: "the latch" (a signal, $T-1$ distractors, the question at
+the end — Module 06's RNN, an LSTM with open gates, its cell-only twin and its textbook-bias twin on
+the same batches; the lag sweep to $T = 320$; the gradient through time; memory length $1 + e^{b_f}$
+and internal state drift; the cell-only gradient never exploding; inside the trained latch). Real:
+character-level Tiny Shakespeare at Module 06's parameter budget, both architectures over a
+learning-rate grid (target ≤ 1.64 nats/char, below the RNN's best), context-length curves, a cell
+that counts along each line. Anim: the cell as a belt with gates; the gradient along the carousel;
+the latch against the lag; full vs cell-only gradient norms; the counting cell.
+*Adds the LSTM layer (forward with h0/c0, BPTT with truncation and cell-only, gate_bias) to
+`lib/*/nanograd`.*
 
 **08 RNN Regularization** — *Dropout done right in recurrent nets.*
 Mechanism: dropout on non-recurrent connections. Anim: masked vs recurrent connections.
