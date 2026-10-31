@@ -239,6 +239,33 @@ void ng_rnn_backward(const double *X, const double *h0, const double *H,
 double ng_clip_grad_norm(double *g, int n, double max_norm);
 
 /* ---------------------------------------------------------------------------
+ * Long short-term memory (Module 07, LSTM).
+ *
+ * An LSTM layer with forget gate over a whole sequence, time-major:
+ *   X:[T,m,n_in]  h0,c0:[m,n_h]  Wx:[n_in,4n_h]  Wh:[n_h,4n_h]  b:[4n_h]
+ *     -> G:[T,m,4n_h] (activated gates)  C:[T,m,n_h] (cells)  H:[T,m,n_h]
+ *   z = x<t> Wx + h<t-1> Wh + b, blocks [i | f | g | o];  i,f,o = sigmoid, g = tanh
+ *   c<t> = f*c<t-1> + i*g,   h<t> = o*tanh(c<t>)     (h0/c0 NULL: zeros)
+ * Backward is backpropagation through time along both paths: given dH it
+ * writes dZ (the gate gradients, [T,m,4n_h]) and dC = dL/dc<t> ([T,m,n_h], the
+ * gradient along the carousel), dX, dh0 and dc0 (any may be NULL), and the
+ * shared weights' gradients, SUMMED over every step and row. truncate = k > 0
+ * cuts both paths every k steps (chunked training); cell_only != 0 cuts the h
+ * path at every step, so the error flows back only along the cell (Hochreiter
+ * & Schmidhuber's 1997 truncated gradient). Loop orders are documented in
+ * lstm.c -- the Python mirror depends on them.
+ * ------------------------------------------------------------------------- */
+void ng_lstm_forward(const double *X, const double *h0, const double *c0,
+                     const double *Wx, const double *Wh, const double *b,
+                     double *G, double *C, double *H, int T, int m, int n_in, int n_h);
+void ng_lstm_backward(const double *X, const double *h0, const double *c0,
+                      const double *G, const double *C, const double *H,
+                      const double *Wx, const double *Wh, const double *dH,
+                      double *dZ, double *dC, double *dX, double *dh0, double *dc0,
+                      double *dWx, double *dWh, double *db,
+                      int T, int m, int n_in, int n_h, int truncate, int cell_only);
+
+/* ---------------------------------------------------------------------------
  * Optimizers, over a flat parameter array of length n. State buffers (velocity
  * / running averages / moments) are caller-owned and zero-initialized once.
  * L2 weight decay adds weight_decay*theta to the gradient.
